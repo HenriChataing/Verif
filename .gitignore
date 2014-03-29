@@ -1,0 +1,12 @@
+*.cmi
+*.cmo
+*.annot
+*.conflicts
+*.swp
+src/main
+src/.depend
+src/parsing/lexer.ml
+src/parsing/lexer.mli
+src/parsing/parser.ml
+src/parsing/parser.mli
+doc/
