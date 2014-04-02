@@ -9,56 +9,38 @@ MODULES = \
   parsing/lexer \
 	front
 
-EXECUTABLE = main
+MAIN = front
+EXECUTABLE = verif
 
-SRC_INCLUDES = -I parsing
-INCLUDES = $(SRC_INCLUDES)
-BFLAGS = -dtypes -g $(INCLUDES)
-OFLAGS = -g $(INCLUDES)
-BLIBS =
-OLIBS =
+INCLUDES = -I parsing
+CFLAGS = -dtypes,-g
+LFLAGS = -g
+BFLAGS = -no-hygiene
 
-OCAMLC = ocamlc
-OCAMLOPT = ocamlopt
-OCAMLDEP = ocamldep
+OCAMLBUILD = ocamlbuild
 OCAMLLEX = ocamllex
 MENHIR = menhir
 
-.PHONY: all clean depend pprint
+
+.PHONY: all clean
 
 all: $(EXECUTABLE)
 
-$(EXECUTABLE): $(MODULES:%=%.cmo)
-	$(OCAMLC) $(BFLAGS) -o $(EXECUTABLE) $(BLIBS) $(MODULES:%=%.cmo)
-
-$(EXECUTABLE).opt: $(MODULES:%=%.cmx)
-	$(OCAMLOPT) $(OFLAGS) -o $(EXECUTABLE) $(OLIBS) $(MODULES:%=%.cmx)
-
-%.cmo: %.ml
-	$(OCAMLC) $(BFLAGS) -c $*.ml
-%.cmi: %.mli
-	$(OCAMLC) $(BFLAGS) -c $*.mli
-%.cmx: %.ml
-	$(OCAMLOPT) $(OFLAGS) -c $*.ml
+$(EXECUTABLE): $(MODULES:%=%.ml) $(GENERATED)
+	@echo "Building.."
+	@$(OCAMLBUILD) $(BFLAGS) -cflags $(CFLAGS) -lflags $(LFLAGS) $(INCLUDES) $(MAIN).native
+	@mv $(MAIN).native $(EXECUTABLE)
 
 %.ml %.mli: %.mly
-	$(MENHIR) --explain --external-tokens Tokens $*.mly
-	sed -e 's/4611686018427387903/max_int/' $*.ml > $*.tmp
-	mv $*.tmp $*.ml
+	@echo "Generating Parser module.."
+	@$(MENHIR) --explain --external-tokens Tokens $*.mly
+	@sed -e 's/4611686018427387903/max_int/' $*.ml > $*.tmp
+	@mv $*.tmp $*.ml
 
 %.ml: %.mll
-	$(OCAMLLEX) $*.mll
+	@echo "Generating Lexer module.."
+	@$(OCAMLLEX) $*.mll
 
 clean:
-	rm -f $(EXECUTABLE) $(EXECUTABLE).opt parsing/parser.ml parsing/lexer.ml *.cm[iox] **/*.cm[iox] **/*.o *.annot **/*.annot
-
-.depend: $(GENERATED) Makefile
-	$(OCAMLDEP) $(SRC_INCLUDES) $(patsubst %, %.ml, $(MODULES)) \
-		$(patsubst %, %.mli, $(MODULES)) $(GENERATED) > .depend
-
-depend:
-	rm -f .depend
-	$(MAKE) .depend
-
-include .depend
+	rm -rf $(EXECUTABLE) _build parsing/parser.ml parsing/lexer.ml
 

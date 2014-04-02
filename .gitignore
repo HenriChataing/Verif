@@ -3,10 +3,11 @@
 *.annot
 *.conflicts
 *.swp
-src/main
-src/.depend
+*.native
+src/verif
 src/parsing/lexer.ml
 src/parsing/lexer.mli
 src/parsing/parser.ml
 src/parsing/parser.mli
 doc/
+_build/
