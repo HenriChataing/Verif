@@ -1,18 +1,18 @@
-GENERATED = parsing/parser.ml parsing/lexer.ml
+GENERATED = smtlib/parser.ml smtlib/lexer.ml
 
 MODULES = \
-	parsing/positions \
+	common/positions \
   errors options \
   syntax \
-  parsing/tokens \
-  parsing/parser \
-  parsing/lexer \
+  smtlib/tokens \
+  smtlib/parser \
+  smtlib/lexer \
 	front
 
 MAIN = front
 EXECUTABLE = verif
 
-INCLUDES = -I parsing
+INCLUDES = -I parsing -I common -I smtlib
 CFLAGS = -dtypes,-g
 LFLAGS = -g
 BFLAGS = -no-hygiene
@@ -42,5 +42,5 @@ $(EXECUTABLE): $(MODULES:%=%.ml) $(GENERATED)
 	@$(OCAMLLEX) $*.mll
 
 clean:
-	rm -rf $(EXECUTABLE) _build parsing/parser.ml parsing/lexer.ml
+	rm -rf $(EXECUTABLE) _build $(GENERATED) $(GENERATED:%.ml=%.mli) **/*.conflicts
 
