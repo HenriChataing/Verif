@@ -12,6 +12,7 @@ MODULES = \
 	parsing/tokens \
 	parsing/parser \
 	parsing/lexer \
+	labels cfg \
 	front
 
 MAIN = front
