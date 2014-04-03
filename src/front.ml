@@ -1,12 +1,15 @@
 (** The front-end driver. *)
 
+open Parser
+open Lexer
+
 type filename = Filename of string
 
 let parse_program filename =
   let cin = open_in filename in
   let buf = Lexing.from_channel cin in
   Lexing.(buf.lex_curr_p <- { buf.lex_curr_p with pos_fname = filename });
-  let ast = Parser.program Lexer.token buf in
+  let ast = SmtParser.program SmtLexer.token buf in
   close_in cin;
   ast
 

@@ -2,7 +2,8 @@
 
 %{
   open Positions
-  open Syntax
+  open SmtSyntax
+  open SmtTokens
 %}
 
 (** Punctuation. *)
@@ -25,7 +26,7 @@
 %token PUSH POP
 %token GETOPTION SETOPTION GETINFO SETINFO
 
-%start<Syntax.command list> program
+%start<SmtSyntax.command list> program
 
 %%
 

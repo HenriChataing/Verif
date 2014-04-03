@@ -1,7 +1,7 @@
 (** Lexical analysis. *)
 
 {
-  open Tokens
+  open SmtTokens
 
   let lexical_error lexbuf = Errors.fatal [lexbuf.Lexing.lex_curr_p]
 

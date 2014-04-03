@@ -1,12 +1,17 @@
-GENERATED = smtlib/parser.ml smtlib/lexer.ml
+GENERATED = \
+	smtlib/smtParser.ml smtlib/smtLexer.ml \
+	parsing/parser.ml parsing/lexer.ml
 
 MODULES = \
 	common/positions \
-  errors options \
-  syntax \
-  smtlib/tokens \
-  smtlib/parser \
-  smtlib/lexer \
+	errors options \
+	smtlib/smtSyntax \
+	smtlib/smtTokens \
+	smtlib/smtParser \
+	smtlib/smtLexer \
+	parsing/tokens \
+	parsing/parser \
+	parsing/lexer \
 	front
 
 MAIN = front
@@ -31,16 +36,23 @@ $(EXECUTABLE): $(MODULES:%=%.ml) $(GENERATED)
 	@$(OCAMLBUILD) $(BFLAGS) -cflags $(CFLAGS) -lflags $(LFLAGS) $(INCLUDES) $(MAIN).native
 	@mv $(MAIN).native $(EXECUTABLE)
 
-%.ml %.mli: %.mly
+smtlib/smtParser.ml smtlib/smtParser.mli: smtlib/smtParser.mly
+	@echo "Generating SmtParser module.."
+	@$(MENHIR) --explain --external-tokens SmtTokens $<
+	@sed -e 's/4611686018427387903/max_int/' $@ > $@.tmp
+	@mv $@.tmp $@
+
+parsing/parser.ml parsing/parser.mli: parsing/parser.mly
 	@echo "Generating Parser module.."
-	@$(MENHIR) --explain --external-tokens Tokens $*.mly
-	@sed -e 's/4611686018427387903/max_int/' $*.ml > $*.tmp
-	@mv $*.tmp $*.ml
+	@$(MENHIR) --explain --external-tokens Tokens $<
+	@sed -e 's/4611686018427387903/max_int/' $@ > $@.tmp
+	@mv $@.tmp $@
 
 %.ml: %.mll
 	@echo "Generating Lexer module.."
 	@$(OCAMLLEX) $*.mll
 
 clean:
-	rm -rf $(EXECUTABLE) _build $(GENERATED) $(GENERATED:%.ml=%.mli) **/*.conflicts
+	rm -rf $(EXECUTABLE) _build **/*.conflicts
+	rm -f $(GENERATED) $(GENERATED:%.ml=%.mli)
 

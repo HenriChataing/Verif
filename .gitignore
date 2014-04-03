@@ -9,5 +9,9 @@ src/parsing/lexer.ml
 src/parsing/lexer.mli
 src/parsing/parser.ml
 src/parsing/parser.mli
+src/smtlib/smtLexer.ml
+src/smtlib/smtLexer.mli
+src/smtlib/smtParser.ml
+src/smtlib/smtParser.mli
 doc/
 _build/
