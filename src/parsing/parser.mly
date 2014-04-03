@@ -35,54 +35,54 @@
 %%
 
 program: ins = nonempty_list(instruction) EOF {
-    ins
+    (lex_join $startpos $endpos, ins)
   }
 | error {
     Errors.fatal [$startpos; $endpos] "Syntax error"
   }
 
-
 instruction:
   WHILE LPAREN e=expression RPAREN b=block SEMICOLON {
-    While (e, b)
+    While (lex_join $startpos $endpos, e, b)
   }
 | CONTINUE SEMICOLON {
-    Continue
+    Continue (lex_join $startpos $endpos)
   }
 | BREAK SEMICOLON {
-    Break
+    Break (lex_join $startpos $endpos)
   }
 | IF LPAREN e=expression RPAREN b=block SEMICOLON {
-    If (e, b, None)
+    If (lex_join $startpos $endpos, e, b, None)
   }
 | IF LPAREN e=expression RPAREN b1=block ELSE b2=block SEMICOLON {
-    If (e, b1, Some b2)
+    If (lex_join $startpos $endpos, e, b1, Some b2)
   }
 | id=LID EQUALS e=expression SEMICOLON {
-    Assign (id, e)
+    Assign (lex_join $startpos $endpos, id, e)
   }
 
 block:
-  ins=nonempty_list(instruction) {
-    ins
+  ins=instruction {
+    (lex_join $startpos $endpos, [ins])
   }
 | LBRACE ins=nonempty_list(instruction) RBRACE {
-    ins
+    (lex_join $startpos $endpos, ins)
   }
+
 
 expression:
   a=atom { a }
-| e1=expression op=INFIX0 e2=expression { Binary (op,e1,e2) }
-| e1=expression op=INFIX1 e2=expression { Binary (op,e1,e2) }
-| e1=expression op=INFIX2 e2=expression { Binary (op,e1,e2) }
-| e1=expression op=INFIX3 e2=expression { Binary (op,e1,e2) }
-| e1=expression MINUS e2=expression { Binary ("-",e1,e2) }
-| MINUS e=expression { Unary ("-",e) }
+| e1=expression op=INFIX0 e2=expression { Binary (lex_join $startpos $endpos, op,e1,e2) }
+| e1=expression op=INFIX1 e2=expression { Binary (lex_join $startpos $endpos, op,e1,e2) }
+| e1=expression op=INFIX2 e2=expression { Binary (lex_join $startpos $endpos, op,e1,e2) }
+| e1=expression op=INFIX3 e2=expression { Binary (lex_join $startpos $endpos, op,e1,e2) }
+| e1=expression MINUS e2=expression { Binary (lex_join $startpos $endpos, "-",e1,e2) }
+| MINUS e=expression { Unary (lex_join $startpos $endpos, "-",e) }
 
 atom:
-  n=NUM { Prim (Int n) }
-| TRUE { Prim (Bool true) }
-| FALSE { Prim (Bool false) }
-| id=LID { Var id }
+  n=NUM { Prim (lex_join $startpos $endpos, Int n) }
+| TRUE { Prim (lex_join $startpos $endpos, Bool true) }
+| FALSE { Prim (lex_join $startpos $endpos, Bool false) }
+| id=LID { Var (lex_join $startpos $endpos, id) }
 | LPAREN e=expression RPAREN { e }
 

@@ -22,17 +22,15 @@
 
 open Lexing
 
-type position =
-    {
-      start_p : Lexing.position;
-      end_p   : Lexing.position
-    }
+type position = {
+  start_p : Lexing.position;
+  end_p   : Lexing.position
+}
 
-let undefined_position =
-  {
-    start_p = Lexing.dummy_pos;
-    end_p   = Lexing.dummy_pos
-  }
+let undefined_position = {
+  start_p = Lexing.dummy_pos;
+  end_p = Lexing.dummy_pos
+}
 
 let start_of_position p = p.start_p
 
@@ -50,14 +48,12 @@ let characters p1 p2 =
   else
     (column p1, column p1 + 1)
 
-let join x1 x2 =
-{
+let join x1 x2 = {
   start_p = if x1 = undefined_position then x2.start_p else x1.start_p;
   end_p   = if x2 = undefined_position then x1.end_p else x2.end_p
 }
 
-let lex_join x1 x2 =
-{
+let lex_join x1 x2 = {
   start_p = x1;
   end_p   = x2
 }
@@ -79,11 +75,10 @@ let pos_or_undef = function
   | None -> undefined_position
   | Some x -> x
 
-let cpos lexbuf =
-  {
-    start_p = Lexing.lexeme_start_p lexbuf;
-    end_p   = Lexing.lexeme_end_p   lexbuf;
-  }
+let cpos lexbuf = {
+  start_p = Lexing.lexeme_start_p lexbuf;
+  end_p   = Lexing.lexeme_end_p   lexbuf;
+}
 
 let string_of_cpos lexbuf =
   string_of_pos (cpos lexbuf)
@@ -93,3 +88,4 @@ let joinf f t1 t2 =
 
 let ljoinf f =
   List.fold_left (fun p t -> join p (f t)) undefined_position
+
