@@ -6,6 +6,7 @@ open Positions
 type ptype =
     TypeInt
   | TypeBool
+  | TypeFloat
 
 (** Literals. *)
 type literal =
@@ -22,6 +23,7 @@ type expression =
 (** Instructions and blocks. *)
 type instruction =
     Assign of position * string * expression
+  | Declare of position * ptype * string * expression option
   | While of position * expression * block
   | If of position * expression * block * block option
   | Break of position
@@ -39,7 +41,7 @@ let position_of_expression (e:expression): position =
 (** Return the position of an instruction. *)
 let position_of_instruction (i:instruction): position =
   match i with
-  | Assign (p,_,_) | While (p,_,_)
+  | Assign (p,_,_) | While (p,_,_) | Declare (p,_,_,_)
   | If (p,_,_,_) | Break p | Continue p -> p
 
 (** Boolean negation and other expressions. *)

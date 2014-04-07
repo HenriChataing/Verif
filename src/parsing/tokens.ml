@@ -16,6 +16,9 @@ type token =
   | WHILE
   | IF
   | ELSE
+  | INT
+  | BOOL
+  | FLOAT
   | BREAK
   | CONTINUE
   | ASSERT

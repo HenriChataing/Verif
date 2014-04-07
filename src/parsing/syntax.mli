@@ -6,6 +6,7 @@ open Positions
 type ptype =
     TypeInt
   | TypeBool
+  | TypeFloat
 
 (** Literals. *)
 type literal =
@@ -22,6 +23,7 @@ type expression =
 (** Instructions and blocks. *)
 type instruction =
     Assign of position * string * expression
+  | Declare of position * ptype * string * expression option
   | While of position * expression * block
   | If of position * expression * block * block option
   | Break of position
@@ -42,7 +44,6 @@ val btrue: expression
 val bfalse: expression
 
 (** Printing. *)
-
 val string_of_literal: literal -> string
 val string_of_expression: expression -> string
 

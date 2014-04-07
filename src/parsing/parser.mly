@@ -22,6 +22,7 @@
 (** Keywords. *)
 %token WHILE
 %token IF ELSE
+%token INT BOOL FLOAT
 %token BREAK CONTINUE
 %token TRUE FALSE
 
@@ -42,7 +43,7 @@ program: ins = nonempty_list(instruction) EOF {
   }
 
 instruction:
-  WHILE LPAREN e=expression RPAREN b=block SEMICOLON {
+  WHILE LPAREN e=expression RPAREN b=block {
     While (lex_join $startpos $endpos, e, b)
   }
 | CONTINUE SEMICOLON {
@@ -51,11 +52,17 @@ instruction:
 | BREAK SEMICOLON {
     Break (lex_join $startpos $endpos)
   }
-| IF LPAREN e=expression RPAREN b=block SEMICOLON {
+| IF LPAREN e=expression RPAREN b=block {
     If (lex_join $startpos $endpos, e, b, None)
   }
-| IF LPAREN e=expression RPAREN b1=block ELSE b2=block SEMICOLON {
+| IF LPAREN e=expression RPAREN b1=block ELSE b2=block {
     If (lex_join $startpos $endpos, e, b1, Some b2)
+  }
+| t=ptype id=LID SEMICOLON {
+    Declare (lex_join $startpos $endpos, t, id, None)
+  }
+| t=ptype id=LID EQUALS e=expression SEMICOLON {
+    Declare (lex_join $startpos $endpos, t, id, Some e)
   }
 | id=LID EQUALS e=expression SEMICOLON {
     Assign (lex_join $startpos $endpos, id, e)
@@ -68,7 +75,6 @@ block:
 | LBRACE ins=nonempty_list(instruction) RBRACE {
     (lex_join $startpos $endpos, ins)
   }
-
 
 expression:
   a=atom { a }
@@ -85,4 +91,9 @@ atom:
 | FALSE { Prim (lex_join $startpos $endpos, Bool false) }
 | id=LID { Var (lex_join $startpos $endpos, id) }
 | LPAREN e=expression RPAREN { e }
+
+%inline ptype:
+  INT { TypeInt }
+| BOOL { TypeBool }
+| FLOAT { TypeFloat }
 

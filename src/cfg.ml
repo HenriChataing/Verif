@@ -44,6 +44,8 @@ exception Loop_interruption of cfg
 (* Insert an instruction in the graph. *)
 let rec insert_instruction (l0: label) (l1: label) (instr: instruction) (cfg: cfg): cfg =
   match instr with
+  (* Variable declarations ignored for now. *)
+  | Declare _ -> cfg
   | Syntax.Assign (p, x, e) -> insert l0 (Assign (x,e), l1) cfg
   | If (p, e, (p0, b0), None) ->
       let l2 = new_label (start_of_position p0) in
