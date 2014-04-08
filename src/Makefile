@@ -19,9 +19,10 @@ MAIN = front
 EXECUTABLE = verif
 
 INCLUDES = -I parsing -I common -I smtlib
-CFLAGS = -dtypes,-g
-LFLAGS = -g
+CFLAGS = -dtypes,-g,-I,/usr/lib/ocaml,-I,/usr/lib/ocaml/apron
+LFLAGS = -g,-I,/usr/lib/ocaml,-I,/usr/lib/ocaml/apron
 BFLAGS = -no-hygiene
+BLIBS = bigarray,apron,polkaMPQ
 
 OCAMLBUILD = ocamlbuild
 OCAMLLEX = ocamllex
@@ -34,7 +35,7 @@ all: $(EXECUTABLE)
 
 $(EXECUTABLE): $(MODULES:%=%.ml) $(GENERATED)
 	@echo "Building.."
-	@$(OCAMLBUILD) $(BFLAGS) -cflags $(CFLAGS) -lflags $(LFLAGS) $(INCLUDES) $(MAIN).native
+	@$(OCAMLBUILD) $(BFLAGS) -libs $(BLIBS) -cflags $(CFLAGS) -lflags $(LFLAGS) $(INCLUDES) $(MAIN).native
 	@mv $(MAIN).native $(EXECUTABLE)
 
 smtlib/smtParser.ml smtlib/smtParser.mli: smtlib/smtParser.mly
