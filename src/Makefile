@@ -9,6 +9,7 @@ MODULES = \
 	smtlib/smtTokens \
 	smtlib/smtParser \
 	smtlib/smtLexer \
+	parsing/environment \
 	parsing/tokens \
 	parsing/parser \
 	parsing/lexer \

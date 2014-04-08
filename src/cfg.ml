@@ -4,6 +4,7 @@ open Positions
 
 open Labels
 open Syntax
+open Environment
 
 
 (** Edges of the graph are labelled by commands. *)
@@ -22,6 +23,16 @@ end
 module LabelMap = Map.Make (LABEL)
 
 type cfg = ((command * label) list) LabelMap.t
+
+
+(** Conversion of expressions. *)
+
+let rec convert (e: expression): expression =
+  match e with
+  | Var (p, v) -> Var (p, find_var p v)
+  | Binary (p, op, e0, e1) -> Binary (p, op, convert e0, convert e1)
+  | Unary (p, op, e) -> Unary (p, op, convert e)
+  | _ -> e
 
 
 (** Construction of the graph. *)
@@ -44,28 +55,39 @@ exception Loop_interruption of cfg
 (* Insert an instruction in the graph. *)
 let rec insert_instruction (l0: label) (l1: label) (instr: instruction) (cfg: cfg): cfg =
   match instr with
-  (* Variable declarations ignored for now. *)
-  | Declare _ -> cfg
-  | Syntax.Assign (p, x, e) -> insert l0 (Assign (x,e), l1) cfg
+  (* This case corresponds to a simple variable declaration (no initialization).
+     TODO: find a way to remove the useless branching condition. *)
+  | Declare (p, t, x, None) ->
+      create_var x t;
+      insert l0 (Cond btrue, l1) cfg
+  | Declare (p, t, x, Some e) ->
+      create_var x t;
+      insert_instruction l0 l1 (Syntax.Assign (p, x, e)) cfg
+  | Syntax.Assign (p, x, e) ->
+      let x' = find_var p x in
+      insert l0 (Assign (x', convert e), l1) cfg
   | If (p, e, (p0, b0), None) ->
       let l2 = new_label (start_of_position p0) in
+      let e = convert e in
       let cfg = insert l0 (Cond e, l2) cfg in
       let cfg = insert l0 (Cond (bnot e), l1) cfg in
-      insert_block l2 l1 b0 cfg
+      in_scope (fun _ -> insert_block l2 l1 b0 cfg)
   | If (p, e, (p0,b0), Some (p1, b1)) ->
       let l2 = new_label (start_of_position p0)
       and l3 = new_label (start_of_position p1) in
+      let e = convert e in
       let cfg = insert l0 (Cond e, l2) cfg in
       let cfg = insert l0 (Cond (bnot e), l3) cfg in
-      insert_block l2 l1 b0
-       (insert_block l3 l1 b1 cfg)
+      let cfg = in_scope (fun _ -> insert_block l3 l1 b1 cfg) in
+      in_scope (fun _ -> insert_block l2 l1 b0 cfg)
   | While (p, e, (p',b)) ->
       let l2 = new_label (start_of_position p') in
+      let e = convert e in
       let cfg = insert l0 (Cond e, l2) cfg in
       let cfg = insert l0 (Cond (bnot e), l1) cfg in
       break_label := l1;
       continue_label := l0;
-      insert_block l2 l0 b cfg
+      in_scope (fun _ -> insert_block l2 l0 b cfg)
   (* This case correspond to blocks that contain only one break or continue statement.
      TODO: simplify this and remove the useless branching condition. *)
   | Break p -> insert l0 (Cond btrue, !break_label) cfg
