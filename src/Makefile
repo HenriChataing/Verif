@@ -13,6 +13,7 @@ MODULES = \
 	parsing/tokens \
 	parsing/parser \
 	parsing/lexer \
+	linexpr bexpr \
 	labels cfg \
 	front
 
