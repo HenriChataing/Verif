@@ -2,6 +2,7 @@
 
 %{
   open Positions
+  open Expressions
   open Syntax
 %}
 

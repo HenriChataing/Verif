@@ -4,15 +4,16 @@ open Positions
 
 open Labels
 open Syntax
-open Environment
-
+open Expressions
 open Bexpr
 open Linexpr
+open Environment
+
 
 (** Edges of the graph are labelled by commands. *)
-type command =
-    Cond of (linexpr * string) bexpr
-  | Assign of string * linexpr
+type 'e command =
+    Cond of ('e * string) Bexpr.t
+  | Assign of string * 'e
 
 
 (** Description of the graph. *)
@@ -24,19 +25,19 @@ end
 
 module LabelMap = Map.Make (LABEL)
 
-type label_info = {
+type 'e label_info = {
   mutable loop_header: bool;                     (* Identify widening points. *)
   mutable do_widen: bool;                        (* When to perform the widening. *)
-  mutable successors: (command * label) list;
+  mutable successors: ('e command * label) list;
   mutable predecessors: label list
 }
 
-type cfg = label_info LabelMap.t
+type 'e cfg = 'e label_info LabelMap.t
 
 
 (** Conversion of expressions to linear expressions.
     Any non linear expression raises an error. *)
-let rec to_linexpr (e: expression): linexpr =
+let rec to_linexpr (e: expression): Linexpr.t =
   match e with
   | Var (p, v) -> { terms = [find_var p v, 1]; constant = 0 }
   | Binary (_, "+", e0, e1) -> add (to_linexpr e0) (to_linexpr e1)
@@ -50,7 +51,7 @@ let rec to_linexpr (e: expression): linexpr =
 
 (** Conversion of expressions to boolean expressions.
     Any non boolean expression raises an error. *)
-let rec to_bexpr (e: expression): (linexpr * string) bexpr =
+let rec to_bexpr (e: expression): (Linexpr.t * string) Bexpr.t =
   match e with
   | Binary (_, "&&", e0, e1) -> band (to_bexpr e0) (to_bexpr e1)
   | Binary (_, "||", e0, e1) -> bor (to_bexpr e0) (to_bexpr e1)
@@ -65,7 +66,7 @@ let rec to_bexpr (e: expression): (linexpr * string) bexpr =
 
 (* Initialize a label in the graph.
    The boolean flag identifies loop headers. *)
-let init_label (l: label) (cfg: cfg): cfg =
+let init_label (l: label) (cfg: 'e cfg): 'e cfg =
   LabelMap.add l {
     loop_header = false;
     do_widen = false;
@@ -74,7 +75,7 @@ let init_label (l: label) (cfg: cfg): cfg =
   } cfg
 
 (* Insert a command in the graph. *)
-let insert (l0: label) (c,l1: command * label) (cfg: cfg): unit =
+let insert (l0: label) (c,l1: 'e command * label) (cfg: 'e cfg): unit =
   try
     let info0 = LabelMap.find l0 cfg
     and info1 = LabelMap.find l1 cfg in
@@ -84,7 +85,7 @@ let insert (l0: label) (c,l1: command * label) (cfg: cfg): unit =
     assert false
 
 (* Mark a label as loop header. *)
-let set_loop_header (l: label) (cfg: cfg): unit =
+let set_loop_header (l: label) (cfg: 'e cfg): unit =
   try
     let info = LabelMap.find l cfg in
     info.loop_header <- true
@@ -96,10 +97,10 @@ let break_label = ref undefined_label
 let continue_label = ref undefined_label
 
 (* Exception to be thrown after a break or continue statement. *)
-exception Loop_interruption of cfg
+exception Loop_interruption of expression cfg
 
 (* Insert an instruction in the graph. *)
-let rec insert_instruction (l0: label) (l1: label) (instr: instruction) (cfg: cfg): cfg =
+let rec insert_instruction (l0: label) (l1: label) (instr: instruction) (cfg: Linexpr.t cfg): Linexpr.t cfg =
   match instr with
   (* This case corresponds to a simple variable declaration (no initialization).
      TODO: find a way to remove the useless branching condition. *)
@@ -146,7 +147,7 @@ let rec insert_instruction (l0: label) (l1: label) (instr: instruction) (cfg: cf
   | Continue p -> insert l0 (Cond Top, !continue_label) cfg; cfg
 
 (* Insert a block in the graph. *)
-and insert_block (l0: label) (l1: label) (is: instruction list) (cfg: cfg): cfg =
+and insert_block (l0: label) (l1: label) (is: instruction list) (cfg: Linexpr.t cfg): Linexpr.t cfg =
   match is with
   | [] -> cfg
   | [i] -> insert_instruction l0 l1 i cfg
@@ -160,7 +161,7 @@ and insert_block (l0: label) (l1: label) (is: instruction list) (cfg: cfg): cfg 
 
 
 (** Main function, build the control flow graph of a program. *)
-let build_cfg (p,b: block): cfg =
+let build_cfg (p,b: block): Linexpr.t cfg =
   reset_labels ();
   let l0 = new_label (start_of_position p)
   and l1 = new_label (end_of_position p) in
@@ -170,14 +171,14 @@ let build_cfg (p,b: block): cfg =
 
 (** Printing. *)
 
-let string_of_command (c: command): string =
+let string_of_command (c: Linexpr.t command): string =
   match c with
   | Cond e ->
-      let string_of_a (e,op) = string_of_linexpr e ^ " " ^ op ^ " 0" in
-      string_of_bexpr string_of_a e ^ " ?"
-  | Assign (x,e) -> x ^ " = " ^ string_of_linexpr e
+      let string_of_a (e,op) = Linexpr.to_string e ^ " " ^ op ^ " 0" in
+      Bexpr.to_string string_of_a e ^ " ?"
+  | Assign (x,e) -> x ^ " = " ^ Linexpr.to_string e
 
-let print_cfg (cfg: cfg): unit =
+let print_cfg (cfg: Linexpr.t cfg): unit =
   LabelMap.iter (fun l0 info ->
     print_string (string_of_label l0 ^ ":");
     print_newline ();

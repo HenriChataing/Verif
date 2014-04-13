@@ -1,17 +1,13 @@
 (** Syntax of the input language. *)
 
 open Positions
+open Expressions
 
 (** Primitive types. *)
 type ptype =
     TypeInt
   | TypeBool
   | TypeFloat
-
-(** Literals. *)
-type literal =
-    Int of int
-  | Bool of bool
 
 (** Expressions. *)
 type expression =
@@ -44,6 +40,5 @@ val btrue: expression
 val bfalse: expression
 
 (** Printing. *)
-val string_of_literal: literal -> string
 val string_of_expression: expression -> string
 

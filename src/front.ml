@@ -2,7 +2,8 @@
 
 open Cfg
 open Labels
-
+open Analysis
+open Expressions
 
 let parse_program filename =
   let cin = open_in filename in
@@ -20,3 +21,4 @@ let main =
   let ast = parse_program f in
   let cfg = build_cfg ast in
   print_cfg cfg
+

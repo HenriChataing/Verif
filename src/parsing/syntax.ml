@@ -1,17 +1,13 @@
 (** Syntax of the input language. *)
 
 open Positions
+open Expressions
 
 (** Primitive types. *)
 type ptype =
     TypeInt
   | TypeBool
   | TypeFloat
-
-(** Literals. *)
-type literal =
-    Int of int
-  | Bool of bool
 
 (** Expressions. *)
 type expression =
@@ -57,12 +53,6 @@ let bfalse: expression =
 
 
 (** Printing. *)
-
-let string_of_literal (l: literal): string =
-  match l with
-  | Int n -> string_of_int n
-  | Bool true -> "true"
-  | Bool false -> "false"
 
 let rec string_of_expression (e: expression): string =
   let parens_string_of_expression e =

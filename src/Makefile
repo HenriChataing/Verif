@@ -13,8 +13,8 @@ MODULES = \
 	parsing/tokens \
 	parsing/parser \
 	parsing/lexer \
-	linexpr bexpr \
-	labels cfg \
+	expressions \
+	labels cfg analysis \
 	front
 
 MAIN = front
@@ -24,7 +24,7 @@ INCLUDES = -I parsing -I common -I smtlib
 CFLAGS = -dtypes,-g,-I,/usr/lib/ocaml,-I,/usr/lib/ocaml/apron
 LFLAGS = -g,-I,/usr/lib/ocaml,-I,/usr/lib/ocaml/apron
 BFLAGS = -no-hygiene
-BLIBS = bigarray,apron,polkaMPQ
+BLIBS = bigarray,gmp,apron,boxMPFR,polkaMPQ
 
 OCAMLBUILD = ocamlbuild
 OCAMLLEX = ocamllex
