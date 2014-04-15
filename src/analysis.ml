@@ -50,13 +50,13 @@ type 'a abstract_info = {
   cfg_info: (Apron.Linexpr1.t, Apron.Lincons1.earray) label_info
 }
 
-type 'a abstract_state = 'a abstract_info LabelMap.t
+type 'a abstract_state = ('a abstract_info) array
 
 
 (** Display the result of the analysis. *)
 let print_abstract (state: 'a abstract_state): unit =
-  LabelMap.iter (fun l info ->
-    print_string (string_of_label l ^ ": ");
+  Array.iteri (fun l info ->
+    print_string ("L" ^ string_of_int l ^ ": ");
     if info.cfg_info.loop_header != None then print_string "loop";
     print_newline ();
     match info.value with
@@ -72,7 +72,7 @@ let print_abstract (state: 'a abstract_state): unit =
 let make_initial_state
     (man: 'a Apron.Manager.t)
     (env: Apron.Environment.t)
-    (cfg: Linexpr.t cfg): 'a abstract_state =
+    (cfg: Linexpr.t Cfg.t): 'a abstract_state =
   (* Convert the information contained in cfg_info. *)
   let rec econvert
       (info: (Linexpr.t, Linexpr.t * string) label_info)
@@ -90,12 +90,12 @@ let make_initial_state
     | Top -> Top | Bot -> Bot
   in 
 
-  LabelMap.mapi (fun l info ->
+  Array.mapi (fun l info ->
     { value = None;
       prev_value = None;
       marker = 0;
       cfg_info = econvert info }
-  ) cfg
+  ) cfg.labels
 
 
 (* Compute the effect of a condition on an absract value. *)
@@ -137,7 +137,7 @@ let perform_analysis
   try
     (* Reset all the markers until the label l1. *)
     let rec reset_markers (l0: label) (l1: label): unit =
-      let info = LabelMap.find l0 state in
+      let info = state.(l0.id) in
       if info.marker != 0 then begin
         info.marker <- 0;
         info.value <- None;
@@ -149,7 +149,7 @@ let perform_analysis
         (onlyjoin: bool)
         (l1: label) (lims: label option * label option)
         (d0: 'a Apron.Abstract1.t): unit =
-      let info = LabelMap.find l1 state in
+      let info = state.(l1.id) in
       let d1 =
         if info.marker = 0 then d0
         else
@@ -173,8 +173,7 @@ let perform_analysis
               info.value <- Some d1
         | Some le -> 
             find_loop_invariant l1 le d1;
-            let inf = LabelMap.find le state in
-            begin match inf.value with
+            begin match state.(le.id).value with
             | None -> ()
             | Some d -> iterate le lims d
             end
@@ -185,15 +184,14 @@ let perform_analysis
         (l0: label)
         (lentry, lexit: label option * label option)
         (d0: 'a Apron.Abstract1.t): unit =
-      let info = LabelMap.find l0 state in
       List.iter (fun (c, l1) ->
         let d1 = with_command man env c d0 in
         join_and_continue (Some l1 = lexit || Some l1 = lentry) l1 (lentry,lexit) d1
-      ) info.cfg_info.successors
+      ) state.(l0.id).cfg_info.successors
 
     (* Find the loop invariant. *)
     and find_loop_invariant (l0: label) (l1: label) (d0: 'a Apron.Abstract1.t): unit =
-      let info = LabelMap.find l0 state
+      let info = state.(l0.id)
       and invariant = ref (Apron.Abstract1.bottom man env)
       and d = ref d0 in
       while not (Apron.Abstract1.is_eq man !d !invariant) do
@@ -224,7 +222,7 @@ let perform_analysis
 
 
 (** Put everything together, and perform an analysis of a control flow graph. *)
-let analyze (cfg: Linexpr.t cfg): (Polka.loose Polka.t) abstract_state =
+let analyze (cfg: Linexpr.t Cfg.t): (Polka.loose Polka.t) abstract_state =
   (* Creation of the manager. *)
   let man = Polka.manager_alloc_loose () in
   (* Creation of the environment. *)

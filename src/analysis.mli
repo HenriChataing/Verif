@@ -24,14 +24,14 @@ type 'a abstract_info = {
   cfg_info: (Apron.Linexpr1.t, Apron.Lincons1.earray) label_info
 }
 
-type 'a abstract_state = 'a abstract_info LabelMap.t
+type 'a abstract_state = ('a abstract_info) array
 
 
 (** Creation of the initial state (top at state 0, bottom everywhere else).  *)
 val make_initial_state:
     'a Apron.Manager.t ->
     Apron.Environment.t ->
-    Linexpr.t cfg ->
+    Linexpr.t Cfg.t ->
     'a abstract_state
 
 (** Abstract interpretation. Starting from the loop headers (and the initial program point),
@@ -43,7 +43,7 @@ val perform_analysis:
     unit
 
 (** Put everything together, and perform an analysis of a control flow graph. *)
-val analyze: Linexpr.t cfg -> (Polka.loose Polka.t) abstract_state
+val analyze: Linexpr.t Cfg.t -> (Polka.loose Polka.t) abstract_state
 
 (** Display the result of the analysis. *)
 val print_abstract: 'a abstract_state -> unit

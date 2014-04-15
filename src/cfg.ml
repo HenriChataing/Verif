@@ -35,6 +35,14 @@ type ('e, 'b) label_info = {
 type 'e cfg = ('e, 'e * string) label_info LabelMap.t
 
 
+(** Representation of the control flow graph. *)
+type 'e t = {
+  labels: (('e, 'e * string) label_info) array;  (* Definition of the graph. *)
+  entry_point: label;                            (* Entry point of the graph. *)
+  size: int
+}
+
+
 (** Conversion of expressions to linear expressions.
     Any non linear expression raises an error. *)
 let rec to_linexpr (e: expression): Linexpr.t =
@@ -173,12 +181,22 @@ and insert_block (l0: label) (l1: label) (is: instruction list) (cfg: Linexpr.t 
 
 
 (** Main function, build the control flow graph of a program. *)
-let build_cfg (p,b: block): Linexpr.t cfg =
+let build_cfg (p,b: block): Linexpr.t t =
   reset_labels ();
   let l0 = new_label (start_of_position p)
   and l1 = new_label (end_of_position p) in
   let cfg = init_label l0 (init_label l1 LabelMap.empty) in
-  insert_block l0 l1 b cfg
+  let cfg = insert_block l0 l1 b cfg in
+  (* Make it an array. *)
+  let arr = Array.make (LabelMap.cardinal cfg) {
+    loop_header = None;
+    do_widen = false;
+    successors = [];
+    predecessors = []
+  } in
+  LabelMap.iter (fun l info ->
+    arr.(l.id) <- info) cfg;
+  { labels = arr; entry_point = l0; size = LabelMap.cardinal cfg }
 
 
 (** Printing. *)
@@ -190,13 +208,13 @@ let string_of_command (c: (Linexpr.t, Linexpr.t * string) command): string =
       Bexpr.to_string string_of_a e ^ " ?"
   | Assign (x,e) -> x ^ " = " ^ Linexpr.to_string e
 
-let print_cfg (cfg: Linexpr.t cfg): unit =
-  LabelMap.iter (fun l0 info ->
-    print_string (string_of_label l0 ^ ":");
+let print_cfg (cfg: Linexpr.t t): unit =
+  Array.iteri (fun l info ->
+    print_string ("L" ^ string_of_int l ^ ":");
     print_newline ();
     List.iter (fun (c, l1) ->
       print_string ("  " ^ string_of_command c ^ " -> " ^ string_of_label l1);
       print_newline ()
     ) info.successors
-  ) cfg
+  ) cfg.labels
 
