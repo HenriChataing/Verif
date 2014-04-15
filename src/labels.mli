@@ -9,5 +9,6 @@ type label = {
 val new_label: Lexing.position -> label
 
 val undefined_label: label
+val init_label: label
 val string_of_label: label -> string
 val reset_labels: unit -> unit

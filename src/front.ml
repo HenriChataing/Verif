@@ -20,5 +20,7 @@ let main =
   let f = Options.filename in
   let ast = parse_program f in
   let cfg = build_cfg ast in
-  print_cfg cfg
+  print_cfg cfg;
+  let astate = analyze cfg in
+  print_abstract astate
 

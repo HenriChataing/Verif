@@ -19,6 +19,11 @@ let undefined_label = {
   position = Lexing.dummy_pos
 }
 
+let init_label = {
+  id = 0;
+  position = Lexing.dummy_pos
+}
+
 let string_of_label (l: label): string =
   "L" ^ string_of_int l.id
 
