@@ -105,8 +105,6 @@ let rec insert_instruction
     (instr: instruction)
     (cfg: Linexpr.t cfg): Linexpr.t cfg =
   match instr with
-  (* This case corresponds to a simple variable declaration (no initialization).
-     TODO: find a way to remove the useless branching condition. *)
   | Declare (p, t, x, None) ->
       create_var x t;
       insert l0 (Cond Top, l1) cfg;
@@ -118,41 +116,52 @@ let rec insert_instruction
       let x' = find_var p x in
       insert l0 (Assign (x', to_linexpr e), l1) cfg;
       cfg
+
   | If (p, e, (p0, b0), None) ->
-      let l2 = new_label (start_of_position p0) in
-      let cfg = init_label l2 cfg in
       let e = to_bexpr e in
-      insert l0 (Cond e, l2) cfg;
+      let cfg = insert_branch l0 l1 (Cond e) (p0, b0) cfg in
       insert l0 (Cond (bnot rev e), l1) cfg;
-      in_scope (fun _ -> insert_block l2 l1 b0 cfg)
+      cfg 
+
   | If (p, e, (p0,b0), Some (p1, b1)) ->
-      let l2 = new_label (start_of_position p0)
-      and l3 = new_label (start_of_position p1) in
-      let cfg = init_label l3 (init_label l2 cfg) in
       let e = to_bexpr e in
-      insert l0 (Cond e, l2) cfg;
-      insert l0 (Cond (bnot rev e), l3) cfg;
-      let cfg = in_scope (fun _ -> insert_block l3 l1 b1 cfg) in
-      in_scope (fun _ -> insert_block l2 l1 b0 cfg)
+      let cfg = insert_branch l0 l1 (Cond e) (p0, b0) cfg in
+      insert_branch l0 l1 (Cond (bnot rev e)) (p1, b1) cfg
+
   | While (p, e, (p',b)) ->
-      let l2 = new_label (start_of_position p') in
-      let cfg = init_label l2 cfg in
       let e = to_bexpr e in
-      set_loop_header l0 l1 cfg;
-      insert l0 (Cond e, l2) cfg;
-      insert l0 (Cond (bnot rev e), l1) cfg;
       break_label := l1;
       continue_label := l0;
-      in_scope (fun _ -> insert_block l2 l0 b cfg)
-  (* This case correspond to blocks that contain only one break or continue statement.
-     TODO: simplify this and remove the useless branching condition. *)
+      set_loop_header l0 l1 cfg;
+      insert l0 (Cond (bnot rev e), l1) cfg;
+      insert_branch l0 l0 (Cond e) (p', b) cfg
+
   | Break p -> insert l0 (Cond Top, !break_label) cfg; cfg
   | Continue p -> insert l0 (Cond Top, !continue_label) cfg; cfg
+
+(* Insert a branch condition. *)
+and insert_branch
+    (l0: label) (l1: label)
+    (c: (Linexpr.t, Linexpr.t * string) command)
+    (p, b: block)
+    (cfg: Linexpr.t cfg): Linexpr.t cfg =
+  match b with
+  | (Break _)::_ -> insert l0 (c, !break_label) cfg; cfg
+  | (Continue _)::_ -> insert l0 (c, !continue_label) cfg; cfg
+  | _ ->
+      let l2 = new_label (start_of_position p) in
+      let cfg = init_label l2 cfg in
+      let cfg = in_scope (fun _ -> insert_block l2 l1 b cfg) in
+      insert l0 (c, l2) cfg; cfg
 
 (* Insert a block in the graph. *)
 and insert_block (l0: label) (l1: label) (is: instruction list) (cfg: Linexpr.t cfg): Linexpr.t cfg =
   match is with
   | [] -> cfg
+  | (Declare (p, t, x, None))::is ->
+      create_var x t;
+      insert l0 (Cond Top, l1) cfg;
+      insert_block l0 l1 is cfg
   | [i] -> insert_instruction l0 l1 i cfg
   | i::(Break _)::_ -> insert_instruction l0 !break_label i cfg
   | i::(Continue _)::_ -> insert_instruction l0 !continue_label i cfg
