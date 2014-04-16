@@ -7,13 +7,12 @@ open Syntax
 open Expressions
 open Bexpr
 open Linexpr
-open Environment
 
 
 (** Edges of the graph are labelled by commands. *)
 type ('e, 'b) command =
     Cond of 'b Bexpr.t
-  | Assign of string * 'e
+  | Assign of var * 'e
 
 
 (** Description of the graph. *)
@@ -47,7 +46,8 @@ type 'e t = {
     Any non linear expression raises an error. *)
 let rec to_linexpr (e: expression): Linexpr.t =
   match e with
-  | Var (p, v) -> { terms = [find_var p v, 1]; constant = 0 }
+  | Var (p, v) -> 
+      { terms = [v.name, 1]; constant = 0 }
   | Binary (_, "+", e0, e1) -> add (to_linexpr e0) (to_linexpr e1)
   | Binary (_, "-", e0, e1) -> add (to_linexpr e0) (mul (to_linexpr e1) (-1))
   | Binary (_, "*", e, Prim (_, Int a)) -> mul (to_linexpr e) a
@@ -113,16 +113,13 @@ let rec insert_instruction
     (instr: instruction)
     (cfg: Linexpr.t cfg): Linexpr.t cfg =
   match instr with
-  | Declare (p, t, x, None) ->
-      create_var x t;
+  | Declare (p, x, None) ->
       insert l0 (Cond Top, l1) cfg;
       cfg
-  | Declare (p, t, x, Some e) ->
-      create_var x t;
+  | Declare (p, x, Some e) ->
       insert_instruction l0 l1 (Syntax.Assign (p, x, e)) cfg
   | Syntax.Assign (p, x, e) ->
-      let x' = find_var p x in
-      insert l0 (Assign (x', to_linexpr e), l1) cfg;
+      insert l0 (Assign (x, to_linexpr e), l1) cfg;
       cfg
 
   | If (p, e, (p0, b0), None) ->
@@ -130,12 +127,10 @@ let rec insert_instruction
       let cfg = insert_branch l0 l1 (Cond e) (p0, b0) cfg in
       insert l0 (Cond (bnot rev e), l1) cfg;
       cfg 
-
   | If (p, e, (p0,b0), Some (p1, b1)) ->
       let e = to_bexpr e in
       let cfg = insert_branch l0 l1 (Cond e) (p0, b0) cfg in
       insert_branch l0 l1 (Cond (bnot rev e)) (p1, b1) cfg
-
   | While (p, e, (p',b)) ->
       let e = to_bexpr e in
       break_label := l1;
@@ -159,16 +154,14 @@ and insert_branch
   | _ ->
       let l2 = new_label (start_of_position p) in
       let cfg = init_label l2 cfg in
-      let cfg = in_scope (fun _ -> insert_block l2 l1 b cfg) in
+      let cfg = insert_block l2 l1 b cfg in
       insert l0 (c, l2) cfg; cfg
 
 (* Insert a block in the graph. *)
 and insert_block (l0: label) (l1: label) (is: instruction list) (cfg: Linexpr.t cfg): Linexpr.t cfg =
   match is with
   | [] -> cfg
-  | (Declare (p, t, x, None))::is ->
-      create_var x t;
-      insert l0 (Cond Top, l1) cfg;
+  | (Declare (p, x, None))::is ->
       insert_block l0 l1 is cfg
   | [i] -> insert_instruction l0 l1 i cfg
   | i::(Break _)::_ -> insert_instruction l0 !break_label i cfg
@@ -206,7 +199,7 @@ let string_of_command (c: (Linexpr.t, Linexpr.t * string) command): string =
   | Cond e ->
       let string_of_a (e,op) = Linexpr.to_string e ^ " " ^ op ^ " 0" in
       Bexpr.to_string string_of_a e ^ " ?"
-  | Assign (x,e) -> x ^ " = " ^ Linexpr.to_string e
+  | Assign (x,e) -> x.name ^ " = " ^ Linexpr.to_string e
 
 let print_cfg (cfg: Linexpr.t t): unit =
   Array.iteri (fun l info ->

@@ -124,7 +124,7 @@ let with_command
   match c with
   | Cond b -> with_cond man env b d
   | Assign (x, e) ->
-      let v = Apron.Var.of_string x in
+      let v = Apron.Var.of_string x.name in
       Apron.Abstract1.assign_linexpr man d v e None
 
 

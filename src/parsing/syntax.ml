@@ -9,17 +9,45 @@ type ptype =
   | TypeBool
   | TypeFloat
 
+
+(** Printing. *)
+let string_of_ptype (t: ptype): string =
+  match t with
+  | TypeInt -> "int" | TypeBool -> "bool"
+  | TypeFloat -> "float"
+
+(** Return the best type of a literal. *)
+let typeof (l: literal): ptype =
+  match l with
+  | Int _ -> TypeInt | Float _ -> TypeFloat
+  | Bool _ -> TypeBool
+
+(** Return [true] iff [t0] is contained in [t1]. *)
+let eqtype (t0: ptype) (t1: ptype) =
+  match t0, t1 with
+  | TypeInt, TypeInt -> true | TypeInt, TypeFloat -> true
+  | TypeFloat, TypeFloat -> true
+  | TypeBool, TypeBool -> true
+  | _ -> false
+
+
+(** Variables. *)
+type var = {
+  name: string;           (* The name of the variable. *)
+  ptype: ptype            (* The type of declaration. *)
+}
+
 (** Expressions. *)
 type expression =
-    Var of position * string
+    Var of position * var
   | Prim of position * literal
   | Binary of position * string * expression * expression
   | Unary of position * string * expression
 
 (** Instructions and blocks. *)
 type instruction =
-    Assign of position * string * expression
-  | Declare of position * ptype * string * expression option
+    Assign of position * var * expression
+  | Declare of position * var * expression option
   | While of position * expression * block
   | If of position * expression * block * block option
   | Break of position
@@ -37,7 +65,7 @@ let position_of_expression (e:expression): position =
 (** Return the position of an instruction. *)
 let position_of_instruction (i:instruction): position =
   match i with
-  | Assign (p,_,_) | While (p,_,_) | Declare (p,_,_,_)
+  | Assign (p,_,_) | While (p,_,_) | Declare (p,_,_)
   | If (p,_,_,_) | Break p | Continue p -> p
 
 (** Boolean negation and other expressions. *)
@@ -61,7 +89,7 @@ let rec string_of_expression (e: expression): string =
     | _ -> string_of_expression e
   in
   match e with
-  | Var (_,x) -> x
+  | Var (_,x) -> x.name
   | Prim (_,l) -> string_of_literal l
   | Binary (_,op,e0,e1) ->
       let pe0 = parens_string_of_expression e0

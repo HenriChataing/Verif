@@ -4,6 +4,7 @@ open Cfg
 open Labels
 open Analysis
 open Expressions
+open Environment
 
 let parse_program filename =
   let cin = open_in filename in
@@ -18,7 +19,7 @@ let parse_program filename =
     the file. *)
 let main =
   let f = Options.filename in
-  let ast = parse_program f in
+  let ast = typecheck (parse_program f) in
   let cfg = build_cfg ast in
   print_cfg cfg;
   let astate = analyze cfg in

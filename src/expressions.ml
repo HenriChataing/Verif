@@ -6,11 +6,12 @@ open Positions
 type literal =
     Int of int
   | Bool of bool
-
+  | Float of float
 
 let string_of_literal (l: literal): string =
   match l with
   | Int n -> string_of_int n
+  | Float f -> string_of_float f
   | Bool true -> "true"
   | Bool false -> "false"
 
@@ -55,7 +56,6 @@ module Linexpr = struct
   type t = {
     terms: (string * int) list;
     constant: int
-
   }
 
   (** Sum two linear expressions. *)

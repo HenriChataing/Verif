@@ -9,17 +9,33 @@ type ptype =
   | TypeBool
   | TypeFloat
 
+(** Printing. *)
+val string_of_ptype: ptype -> string
+
+(** Return the best type of a literal. *)
+val typeof: literal -> ptype
+
+(** Return [true] iff [t0] is contained in [t1]. *)
+val eqtype: ptype -> ptype -> bool
+
+
+(** Variables. *)
+type var = {
+  name: string;           (* The name of the variable. *)
+  ptype: ptype            (* The type of declaration. *)
+}
+
 (** Expressions. *)
 type expression =
-    Var of position * string
+    Var of position * var
   | Prim of position * literal
   | Binary of position * string * expression * expression
   | Unary of position * string * expression
 
 (** Instructions and blocks. *)
 type instruction =
-    Assign of position * string * expression
-  | Declare of position * ptype * string * expression option
+    Assign of position * var * expression
+  | Declare of position * var * expression option
   | While of position * expression * block
   | If of position * expression * block * block option
   | Break of position

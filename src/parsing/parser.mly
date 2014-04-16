@@ -60,13 +60,13 @@ instruction:
     If (lex_join $startpos $endpos, e, b1, Some b2)
   }
 | t=ptype id=LID SEMICOLON {
-    Declare (lex_join $startpos $endpos, t, id, None)
+    Declare (lex_join $startpos $endpos, { name = id; ptype = t }, None)
   }
 | t=ptype id=LID EQUALS e=expression SEMICOLON {
-    Declare (lex_join $startpos $endpos, t, id, Some e)
+    Declare (lex_join $startpos $endpos, { name = id; ptype = t }, Some e)
   }
 | id=LID EQUALS e=expression SEMICOLON {
-    Assign (lex_join $startpos $endpos, id, e)
+    Assign (lex_join $startpos $endpos, { name = id; ptype = TypeInt }, e)
   }
 
 block:
@@ -90,7 +90,7 @@ atom:
   n=NUM { Prim (lex_join $startpos $endpos, Int n) }
 | TRUE { Prim (lex_join $startpos $endpos, Bool true) }
 | FALSE { Prim (lex_join $startpos $endpos, Bool false) }
-| id=LID { Var (lex_join $startpos $endpos, id) }
+| id=LID { Var (lex_join $startpos $endpos, { name = id; ptype = TypeInt }) }
 | LPAREN e=expression RPAREN { e }
 
 %inline ptype:
