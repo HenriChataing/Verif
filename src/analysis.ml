@@ -1,11 +1,15 @@
 (** Conduct an analysis on the control flow graph built upon the surface syntax. *)
 
 open Labels
+open Types
+open Literal
 open Syntax
 open Expressions
+open Expr
 open Linexpr
 open Bexpr
 open Cfg
+
 
 (** Build the environment. *)
 let make_environment (): Apron.Environment.t =
@@ -22,7 +26,7 @@ let make_environment (): Apron.Environment.t =
 (** Translate a linear expression. *)
 let make_linexpr (env: Apron.Environment.t) (e: Linexpr.t): Apron.Linexpr1.t =
   let line = Apron.Linexpr1.make env in
-  let coeff_of_literal (l: literal): Apron.Coeff.t =
+  let coeff_of_literal (l: Literal.t): Apron.Coeff.t =
     match l with
     | Int n -> Apron.Coeff.s_of_int n
     | Float f -> Apron.Coeff.s_of_float f

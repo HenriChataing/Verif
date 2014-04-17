@@ -2,7 +2,10 @@
 
 %{
   open Positions
+  open Types
+  open Literal
   open Expressions
+  open Expr
   open Syntax
 %}
 

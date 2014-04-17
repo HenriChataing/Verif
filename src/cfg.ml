@@ -3,8 +3,10 @@
 open Positions
 
 open Labels
+open Literal
 open Syntax
 open Expressions
+open Expr
 open Bexpr
 open Linexpr
 
@@ -44,7 +46,7 @@ type 'e t = {
 
 (** Conversion of expressions to linear expressions.
     Any non linear expression raises an error. *)
-let rec to_linexpr (e: expression): Linexpr.t =
+let rec to_linexpr (e: Expr.t): Linexpr.t =
   match e with
   | Var (p, v) -> 
       { terms = [v.name, Int 1]; constant = Int 0 }
@@ -54,12 +56,12 @@ let rec to_linexpr (e: expression): Linexpr.t =
   | Binary (_, "*", Prim (_, a), e) -> mul (to_linexpr e) a
   | Unary (_, "-", e) -> minus (to_linexpr e)
   | Prim (_, a) -> { terms = []; constant = a }
-  | _ -> Errors.fatal' (position_of_expression e) "This expression is not linear"
+  | _ -> Errors.fatal' (Expr.position e) "This expression is not linear"
 
 
 (** Conversion of expressions to boolean expressions.
     Any non boolean expression raises an error. *)
-let rec to_bexpr (e: expression): (Linexpr.t * string) Bexpr.t =
+let rec to_bexpr (e: Expr.t): (Linexpr.t * string) Bexpr.t =
   match e with
   | Binary (_, "&&", e0, e1) -> band (to_bexpr e0) (to_bexpr e1)
   | Binary (_, "||", e0, e1) -> bor (to_bexpr e0) (to_bexpr e1)
@@ -68,7 +70,7 @@ let rec to_bexpr (e: expression): (Linexpr.t * string) Bexpr.t =
       and le1 = to_linexpr e1 in
       Atom (comp p op le0 le1)
   | Prim (_, Bool b) -> if b then Top else Bot
-  | _ -> Errors.fatal' (position_of_expression e) "This expression is not boolean"
+  | _ -> Errors.fatal' (Expr.position e) "This expression is not boolean"
 
 (** Construction of the graph. *)
 
@@ -105,7 +107,7 @@ let break_label = ref undefined_label
 let continue_label = ref undefined_label
 
 (* Exception to be thrown after a break or continue statement. *)
-exception Loop_interruption of expression cfg
+exception Loop_interruption of Expr.t cfg
 
 (* Insert an instruction in the graph. *)
 let rec insert_instruction

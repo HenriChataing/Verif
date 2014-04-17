@@ -1,57 +1,22 @@
 (** Contains the definition of several kinds of expressions. *)
 
 open Positions
+open Literal
+open Types
 
-(** Literals. *)
-type literal =
-    Int of int
-  | Bool of bool
-  | Float of float
-
-let string_of_literal (l: literal): string =
-  match l with
-  | Int n -> string_of_int n
-  | Float f -> string_of_float f
-  | Bool true -> "true"
-  | Bool false -> "false"
-
-let addl (l0: literal) (l1: literal): literal =
-  match l0, l1 with
-  | Int n0, Int n1 -> Int (n0 + n1)
-  | Float f0, Float f1 -> Float (f0 +. f1)
-  | Int n0, Float f1 -> Float (float n0 +. f1)
-  | Float f0, Int n1 -> Float (f0 +. float n1)
-  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals"
-
-let mull (l0: literal) (l1: literal): literal =
-  match l0, l1 with
-  | Int n0, Int n1 -> Int (n0 * n1)
-  | Float f0, Float f1 -> Float (f0 *. f1)
-  | Int n0, Float f1 -> Float (float n0 *. f1)
-  | Float f0, Int n1 -> Float (f0 *. float n1)
-  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals"
-
-
-let negl (l: literal): literal =
-  match l with
-  | Int n -> Int (-n) | Float f -> Float (-.f)
-  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals" 
-
-let eq0 (l: literal): bool =
-  l = Int 0 || l = Float 0.
-
-let lt0 (l: literal): bool =
-  match l with
-  | Int n -> n < 0 | Float f -> f < 0.
-  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals"
+(** Variables. *)
+type var = {
+  name: string;           (* The name of the variable. *)
+  ptype: ptype            (* The type of declaration. *)
+}
 
 
 (** Basic expressions. *)
 module Expr = struct
   (** Type of expressions. *)
   type t =
-     Var of position * string
-  | Prim of position * literal
+     Var of position * var
+  | Prim of position * Literal.t
   | Binary of position * string * t * t
   | Unary of position * string * t
 
@@ -64,8 +29,8 @@ module Expr = struct
       | _ -> to_string e
     in
     match e with
-    | Var (_,x) -> x
-    | Prim (_,l) -> string_of_literal l
+    | Var (_,x) -> x.name
+    | Prim (_,l) -> Literal.to_string l
     | Binary (_,op,e0,e1) ->
         let pe0 = parens_string_of_expression e0
         and pe1 = parens_string_of_expression e1 in
@@ -73,6 +38,12 @@ module Expr = struct
     | Unary (_,op,e) ->
         let pe = parens_string_of_expression e in
         op ^ " " ^ pe
+
+  (** Return the position. *)
+  let position (e: t): Positions.position =
+    match e with
+    | Var (p,_) | Prim (p,_)
+    | Binary (p,_,_,_) | Unary (p,_,_) -> p
 
 end
 
@@ -82,8 +53,8 @@ module Linexpr = struct
 
   (** Type of linear expressions. *)
   type t = {
-    terms: (string * literal) list;
-    constant: literal
+    terms: (string * Literal.t) list;
+    constant: Literal.t
   }
 
   (** Sum two linear expressions. *)
@@ -93,23 +64,23 @@ module Linexpr = struct
     | (v', c')::vs ->
         if v = v' then
           let c'' = f c' in
-          (true, if eq0 c'' then vs else (v', c'')::vs)
+          (true, if Literal.eq0 c'' then vs else (v', c'')::vs)
         else
           let (b, vs) = update v f vs in
           (b, (v',c')::vs)
     in
     let ts0 = List.fold_left (fun ts (v, c) ->
-      let b, ts = update v (fun c' -> addl c c') ts in
+      let b, ts = update v (fun c' -> Literal.add c c') ts in
       if b then ts else (v, c)::ts
     ) e0.terms e1.terms in
     { terms = ts0;
-      constant = addl e0.constant e1.constant }
+      constant = Literal.add e0.constant e1.constant }
 
 
   (** Multiply a linear expression by a constant. *)
-  let mul (e: t) (a: literal): t =
-    { terms = List.map (fun (v,c) -> (v, mull a c)) e.terms;
-      constant = mull a e.constant }
+  let mul (e: t) (a: Literal.t): t =
+    { terms = List.map (fun (v,c) -> (v, Literal.mul a c)) e.terms;
+      constant = Literal.mul a e.constant }
 
 
   (** Substract two linear expressions. *)
@@ -140,20 +111,20 @@ module Linexpr = struct
   (** Printing. *)
   let to_string (e: t): string =
     let pc =
-      if eq0 e.constant then "" else string_of_literal e.constant
+      if Literal.eq0 e.constant then "" else Literal.to_string e.constant
     in
     let pe = List.fold_left (fun s (x, c) ->
       if s = "" then
         match c with
         | Int 0 -> "" | Int 1 -> x | Int (-1) -> "-" ^ x
         | Float 0. -> "" | Float 1. -> x | Float (-1.) -> "-" ^ x
-        | _ -> string_of_literal c ^ x
+        | _ -> Literal.to_string c ^ x
       else
         match c with
         | Int 0 -> s | Int 1 -> s ^ " + " ^ x | Int (-1) -> s ^ " - " ^ x
         | Float 0. -> s | Float 1. -> s ^ " + " ^ x | Float (-1.) -> s ^ " - " ^ x
-        | c when lt0 c -> s ^ " - " ^ string_of_literal (negl c) ^ x
-        | _ -> s ^ " + " ^ string_of_literal c ^ x  
+        | c when Literal.lt0 c -> s ^ " - " ^ Literal.to_string (Literal.neg c) ^ x
+        | _ -> s ^ " + " ^ Literal.to_string c ^ x  
     ) pc e.terms
     in
     if pe = "" then "0" else pe

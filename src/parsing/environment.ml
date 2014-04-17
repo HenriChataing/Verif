@@ -2,13 +2,17 @@
     includes means of constructing scopes. *)
 
 open Syntax
+open Expressions
+open Expr
+open Types
+open Literal
 
 
 (** Record the type of definition of each variable. *)
-let variable_types: (string * Syntax.ptype) list ref = ref []
+let variable_types: (string * ptype) list ref = ref []
 
 (** The scopes forming the environment. *)
-let environment: (string * Syntax.var) list list ref = ref [[]]
+let environment: (string * var) list list ref = ref [[]]
 
 (** Generation of variables. A counter is associated with each prefix. *)
 let variable_counters: (string * int) list ref = ref []
@@ -17,7 +21,7 @@ let variable_counters: (string * int) list ref = ref []
 exception Found of var
 
 (** Check for the existance of a variable in the current environment. *)
-let find_var (p: Positions.position) (v: string): Syntax.var =
+let find_var (p: Positions.position) (v: string): var =
   try
     List.iter (fun scope -> 
       try
@@ -29,7 +33,7 @@ let find_var (p: Positions.position) (v: string): Syntax.var =
 
 
 (** Create a new variable. *)
-let create_var (v: string) (t: Syntax.ptype): Syntax.var =
+let create_var (v: string) (t: ptype): var =
   let v' = try
     let c = List.assoc v !variable_counters in
     variable_counters := List.map (fun (v', c') ->
@@ -68,18 +72,18 @@ let in_scope (f: unit -> 'a): 'a =
 
 
 (** Return the list of all typed variables. *)
-let typed_variables (): (string * Syntax.ptype) list =
+let typed_variables (): (string * ptype) list =
   !variable_types
 
 
 (* Raise an exception if the types differ. *)
 let checktype (p: Positions.position) (t: ptype) (t': ptype) =
-  if not (eqtype t t') then Errors.fatal' p
+  if not (subtype t t') then Errors.fatal' p
     ("This expression has type " ^ string_of_ptype t ^
     "\n but an expression was expected of type " ^ string_of_ptype t')
 
 (** Type checking and scope analysis, in an expression. *)
-let rec typecheck_expression (e: expression) (expected: ptype): expression =
+let rec typecheck_expr (e: Expr.t) (expected: ptype): Expr.t =
   match e with
   | Var (p, x) -> let x' = find_var p x.name in
       checktype p x'.ptype expected;
@@ -90,24 +94,24 @@ let rec typecheck_expression (e: expression) (expected: ptype): expression =
   | Binary (p, ("+" as op), e0, e1) | Binary (p, ("-" as op), e0, e1)
   | Binary (p, ("*" as op), e0, e1) ->
       checktype p TypeInt expected;
-      let e0 = typecheck_expression e0 expected
-      and e1 = typecheck_expression e1 expected in
+      let e0 = typecheck_expr e0 expected
+      and e1 = typecheck_expr e1 expected in
       Binary (p, op, e0, e1)
   | Binary (p, ("==" as op), e0, e1) | Binary (p, ("!=" as op), e0, e1)
   | Binary (p, ("<=" as op), e0, e1) | Binary (p, (">=" as op), e0, e1)
   | Binary (p, ("<" as op), e0, e1) | Binary (p, (">" as op), e0, e1) ->
       checktype p TypeBool expected;
-      let e0 = typecheck_expression e0 TypeFloat
-      and e1 = typecheck_expression e1 TypeFloat in
+      let e0 = typecheck_expr e0 TypeFloat
+      and e1 = typecheck_expr e1 TypeFloat in
       Binary (p, op, e0, e1)
   | Binary (p, ("&&" as op), e0, e1) | Binary (p, ("||" as op), e0, e1) ->
       checktype p TypeBool expected;
-      let e0 = typecheck_expression e0 TypeBool
-      and e1 = typecheck_expression e1 TypeBool in
+      let e0 = typecheck_expr e0 TypeBool
+      and e1 = typecheck_expr e1 TypeBool in
       Binary (p, op, e0, e1)
   | Unary (p, "-", e) ->
       checktype p TypeInt expected;
-      let e = typecheck_expression e expected in
+      let e = typecheck_expr e expected in
       Unary (p, "-", e)
   | _ -> e
 
@@ -118,24 +122,24 @@ let rec typecheck_instruction (i: instruction): instruction =
       let x' = create_var x.name x.ptype in
       Declare (p, x', None)
   | Declare (p, x, Some e) ->
-      let e' = typecheck_expression e x.ptype
+      let e' = typecheck_expr e x.ptype
       and x' = create_var x.name x.ptype in
       Declare (p, x', Some e')
   | Assign (p, x, e) ->
       let x' = find_var p x.name in
-      let e' = typecheck_expression e x'.ptype in
+      let e' = typecheck_expr e x'.ptype in
       Assign (p, x', e')
   | If (p, e, (p0, b0), None) ->
-      let e' = typecheck_expression e TypeBool
+      let e' = typecheck_expr e TypeBool
       and b0' = in_scope (fun _ -> typecheck_block b0) in
       If (p, e', (p0, b0'), None)
   | If (p, e, (p0, b0), Some (p1, b1)) ->
-      let e' = typecheck_expression e TypeBool
+      let e' = typecheck_expr e TypeBool
       and b0' = in_scope (fun _ -> typecheck_block b0)
       and b1' = in_scope (fun _ -> typecheck_block b1) in
       If (p, e', (p0, b0'), Some (p1, b1'))
   | While (p, e, (p0, b0)) ->
-      let e' = typecheck_expression e TypeBool
+      let e' = typecheck_expr e TypeBool
       and b0' = in_scope (fun _ -> typecheck_block b0) in
       While (p, e', (p0, b0'))
   | _ -> i
