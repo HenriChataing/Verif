@@ -12,6 +12,8 @@ type instruction =
   | If of position * Expr.t * block * block option
   | Break of position
   | Continue of position
+  | Assert of position * Expr.t
+  | Prove of position * Expr.t   (* A goal condition. *)
 
 and block = position * instruction list
 

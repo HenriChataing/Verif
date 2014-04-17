@@ -54,8 +54,6 @@ let make_constraint (env: Apron.Environment.t) (e,op: Linexpr.t * string): Apron
 (** Abstraction the program states. Only the loop header are retained. *)
 type 'a abstract_info = {
   mutable value: 'a Apron.Abstract1.t option;
-  (* Previous abstract value. Set only for loop headers. *)
-  mutable prev_value: 'a Apron.Abstract1.t option;
   (* Number of visits of the label. *)
   mutable marker: int;
   cfg_info: (Apron.Linexpr1.t, Apron.Lincons1.earray) label_info
@@ -88,11 +86,17 @@ let make_initial_state
   let rec econvert
       (info: (Linexpr.t, Linexpr.t * string) label_info)
     : (Apron.Linexpr1.t, Apron.Lincons1.earray) label_info =
-    { info with successors = List.map (fun (c, l) ->
-       (match c with
-        | Cond b -> Cond (bconvert b)
-        | Assign (x, e) -> Assign (x, make_linexpr env e)), l
-      ) info.successors }
+    { info with
+        successors = List.map (fun (c, l) ->
+          (match c with
+           | Cond b -> Cond (bconvert b)
+           | Assign (x, e) -> Assign (x, make_linexpr env e)), l
+          ) info.successors;
+        goal_condition =
+          match info.goal_condition with
+          | None -> None
+          | Some b -> Some (bconvert b)
+    }
   and bconvert (b: (Linexpr.t * string) Bexpr.t): Apron.Lincons1.earray Bexpr.t =
     match b with
     | Atom (e, op) -> Atom (make_constraint env (e, op))
@@ -103,7 +107,6 @@ let make_initial_state
 
   Array.mapi (fun l info ->
     { value = None;
-      prev_value = None;
       marker = 0;
       cfg_info = econvert info }
   ) cfg.labels

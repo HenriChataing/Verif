@@ -15,6 +15,8 @@ type instruction =
   | If of position * Expr.t * block * block option
   | Break of position
   | Continue of position
+  | Assert of position * Expr.t
+  | Prove of position * Expr.t  (* A goal condition. *)
 
 and block = position * instruction list
 
@@ -23,7 +25,8 @@ and block = position * instruction list
 let position_of_instruction (i:instruction): position =
   match i with
   | Assign (p,_,_) | While (p,_,_) | Declare (p,_,_)
-  | If (p,_,_,_) | Break p | Continue p -> p
+  | If (p,_,_,_) | Break p | Continue p
+  | Assert (p, _) | Prove (p, _) -> p
 
 (** Boolean negation and other Expr.ts. *)
 let bnot (e: Expr.t): Expr.t =

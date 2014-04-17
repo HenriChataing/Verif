@@ -27,8 +27,8 @@ end
 module LabelMap = Map.Make (LABEL)
 
 type ('e, 'b) label_info = {
-  mutable loop_header: label option;             (* Identify widening points. *)
-  mutable do_widen: bool;                        (* When to perform the widening. *)
+  mutable loop_header: label option;                       (* Identify widening points. *)
+  mutable goal_condition: ('b Bexpr.t) option;             (* A condition to prove. *)
   mutable successors: (('e, 'b) command * label) list;
   mutable predecessors: label list
 }
@@ -79,7 +79,7 @@ let rec to_bexpr (e: Expr.t): (Linexpr.t * string) Bexpr.t =
 let init_label (l: label) (cfg: 'e cfg): 'e cfg =
   LabelMap.add l {
     loop_header = None;
-    do_widen = false;
+    goal_condition = None;
     successors = [];
     predecessors = []
   } cfg
@@ -99,6 +99,17 @@ let set_loop_header (l: label) (lexit: label) (cfg: 'e cfg): unit =
   try
     let info = LabelMap.find l cfg in
     info.loop_header <- Some lexit
+  with Not_found ->
+    assert false
+
+(* Add a goal to a label. *)
+let add_goal (l: label) (goal: ('e * string) Bexpr.t) (cfg: 'e cfg): unit =
+  try
+    let info = LabelMap.find l cfg in
+    match info.goal_condition with
+    | None -> info.goal_condition <- Some goal
+    | Some (Conj bs) -> info.goal_condition <- Some (Conj (goal::bs))
+    | Some b -> info.goal_condition <- Some (Conj [b; goal])
   with Not_found ->
     assert false
 
@@ -140,6 +151,17 @@ let rec insert_instruction
       set_loop_header l0 l1 cfg;
       insert l0 (Cond (bnot rev e), l1) cfg;
       insert_branch l0 l0 (Cond e) (p', b) cfg
+  
+  (* Assertions are turned into conditional jumps. *)
+  | Assert (p, e) ->
+      let e = to_bexpr e in
+      insert l0 (Cond e, l1) cfg;
+      cfg
+  (* Goal conditions are inserted into the label's information. *)
+  | Prove (p, e) ->
+      let e = to_bexpr e in
+      add_goal l0 e cfg;
+      cfg
 
   | Break p -> insert l0 (Cond Top, !break_label) cfg; cfg
   | Continue p -> insert l0 (Cond Top, !continue_label) cfg; cfg
@@ -165,6 +187,10 @@ and insert_block (l0: label) (l1: label) (is: instruction list) (cfg: Linexpr.t 
   | [] -> cfg
   | (Declare (p, x, None))::is ->
       insert_block l0 l1 is cfg
+  (* Goal conditions are inserted into the label's information. *)
+  | (Prove (p, e))::is ->
+      add_goal l0 (to_bexpr e) cfg;
+      insert_block l0 l1 is cfg
   | [i] -> insert_instruction l0 l1 i cfg
   | i::(Break _)::_ -> insert_instruction l0 !break_label i cfg
   | i::(Continue _)::_ -> insert_instruction l0 !continue_label i cfg
@@ -185,7 +211,7 @@ let build_cfg (p,b: block): Linexpr.t t =
   (* Make it an array. *)
   let arr = Array.make (LabelMap.cardinal cfg) {
     loop_header = None;
-    do_widen = false;
+    goal_condition = None;
     successors = [];
     predecessors = []
   } in

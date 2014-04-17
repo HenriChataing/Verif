@@ -36,7 +36,7 @@ rule token = parse
 
   | newline { new_line lexbuf; token lexbuf }
   | blank+  { token lexbuf }
-  | "/*"     { comment 0 lexbuf }
+  | "/*"    { comment 0 lexbuf }
 
   (** Keywords *)
 
@@ -75,9 +75,11 @@ rule token = parse
   | _  { lexical_error lexbuf "Invalid character." }
 
 and comment depth = parse
-  | eof { lexical_error lexbuf "Unclosed comment at end of file." }
+  | eof { lexical_error lexbuf "Unfinished comment at end of file." }
   | newline { new_line lexbuf; comment depth lexbuf }
-  | "*/" { if depth <= 0 then token lexbuf else comment (depth-1) lexbuf }
+  | "*/" { if depth = 0 then token lexbuf
+           else if depth > 0 then comment (depth-1) lexbuf
+           else lexical_error lexbuf "Unmatched end of comment '*/'." }
   | "/*" { comment (depth+1) lexbuf }
   | _ { comment depth lexbuf }
 

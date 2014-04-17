@@ -17,8 +17,6 @@ val make_constraint: Apron.Environment.t -> (Linexpr.t * string) -> Apron.Lincon
 (** Abstraction the program states. Only the loop header are retained. *)
 type 'a abstract_info = {
   mutable value: 'a Apron.Abstract1.t option;
-  (* Previous abstract value. Set only for loop headers. *)
-  mutable prev_value: 'a Apron.Abstract1.t option;
   (* Number of visits of the label. *)
   mutable marker: int;
   cfg_info: (Apron.Linexpr1.t, Apron.Lincons1.earray) label_info
