@@ -12,6 +12,7 @@
 (** Punctuation. *)
 %token LPAREN RPAREN
 %token LBRACE RBRACE
+%token OPEN_COMMENT CLOSE_COMMENT
 %token SEMICOLON EQUALS
 %token MINUS
 %token EOF
@@ -30,6 +31,7 @@
 %token INT BOOL FLOAT
 %token BREAK CONTINUE
 %token TRUE FALSE
+
 
 %left INFIX0
 %right INFIX1
@@ -50,7 +52,10 @@ program: ins = nonempty_list(instruction) EOF {
   }
 
 instruction:
-  WHILE LPAREN e=expression RPAREN b=block {
+  OPEN_COMMENT e=expression CLOSE_COMMENT {
+    Prove (lex_join $startpos $endpos, e)
+  }
+| WHILE LPAREN e=expression RPAREN b=block {
     While (lex_join $startpos $endpos, e, b)
   }
 | CONTINUE SEMICOLON {

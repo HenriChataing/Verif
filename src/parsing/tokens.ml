@@ -30,6 +30,8 @@ type token =
   | RPAREN
   | LBRACE
   | RBRACE
+  | OPEN_COMMENT
+  | CLOSE_COMMENT
   | SEMICOLON
   | EQUALS
 
