@@ -15,7 +15,35 @@ let string_of_literal (l: literal): string =
   | Bool true -> "true"
   | Bool false -> "false"
 
+let addl (l0: literal) (l1: literal): literal =
+  match l0, l1 with
+  | Int n0, Int n1 -> Int (n0 + n1)
+  | Float f0, Float f1 -> Float (f0 +. f1)
+  | Int n0, Float f1 -> Float (float n0 +. f1)
+  | Float f0, Int n1 -> Float (f0 +. float n1)
+  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals"
 
+let mull (l0: literal) (l1: literal): literal =
+  match l0, l1 with
+  | Int n0, Int n1 -> Int (n0 * n1)
+  | Float f0, Float f1 -> Float (f0 *. f1)
+  | Int n0, Float f1 -> Float (float n0 *. f1)
+  | Float f0, Int n1 -> Float (f0 *. float n1)
+  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals"
+
+
+let negl (l: literal): literal =
+  match l with
+  | Int n -> Int (-n) | Float f -> Float (-.f)
+  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals" 
+
+let eq0 (l: literal): bool =
+  l = Int 0 || l = Float 0.
+
+let lt0 (l: literal): bool =
+  match l with
+  | Int n -> n < 0 | Float f -> f < 0.
+  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals"
 
 
 (** Basic expressions. *)
@@ -54,8 +82,8 @@ module Linexpr = struct
 
   (** Type of linear expressions. *)
   type t = {
-    terms: (string * int) list;
-    constant: int
+    terms: (string * literal) list;
+    constant: literal
   }
 
   (** Sum two linear expressions. *)
@@ -65,32 +93,32 @@ module Linexpr = struct
     | (v', c')::vs ->
         if v = v' then
           let c'' = f c' in
-          (true, if c'' = 0 then vs else (v', c'')::vs)
+          (true, if eq0 c'' then vs else (v', c'')::vs)
         else
           let (b, vs) = update v f vs in
           (b, (v',c')::vs)
     in
     let ts0 = List.fold_left (fun ts (v, c) ->
-      let b, ts = update v (fun c' -> c + c') ts in
+      let b, ts = update v (fun c' -> addl c c') ts in
       if b then ts else (v, c)::ts
     ) e0.terms e1.terms in
     { terms = ts0;
-      constant = e0.constant + e1.constant }
+      constant = addl e0.constant e1.constant }
 
 
   (** Multiply a linear expression by a constant. *)
-  let mul (e: t) (a: int): t =
-    { terms = List.map (fun (v,c) -> (v, a*c)) e.terms;
-      constant = e.constant * a }
+  let mul (e: t) (a: literal): t =
+    { terms = List.map (fun (v,c) -> (v, mull a c)) e.terms;
+      constant = mull a e.constant }
 
 
   (** Substract two linear expressions. *)
   let sub (e0: t) (e1: t): t =
-    add e0 (mul e1 (-1))
+    add e0 (mul e1 (Int (-1)))
 
 
   let minus (e: t): t =
-    mul e (-1)
+    mul e (Int (-1))
 
 
   (** Normalize a comparison between linear expressions. *)
@@ -112,18 +140,20 @@ module Linexpr = struct
   (** Printing. *)
   let to_string (e: t): string =
     let pc =
-      if e.constant = 0 then "" else string_of_int e.constant
+      if eq0 e.constant then "" else string_of_literal e.constant
     in
     let pe = List.fold_left (fun s (x, c) ->
       if s = "" then
         match c with
-        | 0 -> "" | 1 -> x | -1 -> "-" ^ x
-        | _ -> string_of_int c ^ x
+        | Int 0 -> "" | Int 1 -> x | Int (-1) -> "-" ^ x
+        | Float 0. -> "" | Float 1. -> x | Float (-1.) -> "-" ^ x
+        | _ -> string_of_literal c ^ x
       else
         match c with
-        | 0 -> s | 1 -> s ^ " + " ^ x | -1 -> s ^ " - " ^ x
-        | c when c < 0 -> s ^ " - " ^ string_of_int (-c) ^ x
-        | _ -> s ^ " + " ^ string_of_int c ^ x  
+        | Int 0 -> s | Int 1 -> s ^ " + " ^ x | Int (-1) -> s ^ " - " ^ x
+        | Float 0. -> s | Float 1. -> s ^ " + " ^ x | Float (-1.) -> s ^ " - " ^ x
+        | c when lt0 c -> s ^ " - " ^ string_of_literal (negl c) ^ x
+        | _ -> s ^ " + " ^ string_of_literal c ^ x  
     ) pc e.terms
     in
     if pe = "" then "0" else pe

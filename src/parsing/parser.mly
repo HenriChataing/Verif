@@ -19,6 +19,7 @@
 
 (** Literals. *)
 %token<int> NUM
+%token<float> DEC
 
 (** Keywords. *)
 %token WHILE
@@ -88,6 +89,7 @@ expression:
 
 atom:
   n=NUM { Prim (lex_join $startpos $endpos, Int n) }
+| d=DEC { Prim (lex_join $startpos $endpos, Float d) }
 | TRUE { Prim (lex_join $startpos $endpos, Bool true) }
 | FALSE { Prim (lex_join $startpos $endpos, Bool false) }
 | id=LID { Var (lex_join $startpos $endpos, { name = id; ptype = TypeInt }) }

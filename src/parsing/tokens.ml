@@ -2,6 +2,7 @@ type token =
   (** Literals and identifiers. *)
 
   | NUM of int
+  | DEC of float
   | LID of string
   | INFIX0 of string
   | INFIX1 of string

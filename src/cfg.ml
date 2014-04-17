@@ -47,13 +47,13 @@ type 'e t = {
 let rec to_linexpr (e: expression): Linexpr.t =
   match e with
   | Var (p, v) -> 
-      { terms = [v.name, 1]; constant = 0 }
+      { terms = [v.name, Int 1]; constant = Int 0 }
   | Binary (_, "+", e0, e1) -> add (to_linexpr e0) (to_linexpr e1)
-  | Binary (_, "-", e0, e1) -> add (to_linexpr e0) (mul (to_linexpr e1) (-1))
-  | Binary (_, "*", e, Prim (_, Int a)) -> mul (to_linexpr e) a
-  | Binary (_, "*", Prim (_, Int a), e) -> mul (to_linexpr e) a
-  | Unary (_, "-", e) -> mul (to_linexpr e) (-1)
-  | Prim (_, Int i) -> { terms = []; constant = i }
+  | Binary (_, "-", e0, e1) -> add (to_linexpr e0) (minus (to_linexpr e1))
+  | Binary (_, "*", e, Prim (_, a)) -> mul (to_linexpr e) a
+  | Binary (_, "*", Prim (_, a), e) -> mul (to_linexpr e) a
+  | Unary (_, "-", e) -> minus (to_linexpr e)
+  | Prim (_, a) -> { terms = []; constant = a }
   | _ -> Errors.fatal' (position_of_expression e) "This expression is not linear"
 
 

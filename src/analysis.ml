@@ -22,8 +22,15 @@ let make_environment (): Apron.Environment.t =
 (** Translate a linear expression. *)
 let make_linexpr (env: Apron.Environment.t) (e: Linexpr.t): Apron.Linexpr1.t =
   let line = Apron.Linexpr1.make env in
-  let coefs = List.map (fun (x, c) -> Apron.Coeff.s_of_int c, Apron.Var.of_string x) e.terms in
-  Apron.Linexpr1.set_list line coefs (Some (Apron.Coeff.s_of_int e.constant));
+  let coeff_of_literal (l: literal): Apron.Coeff.t =
+    match l with
+    | Int n -> Apron.Coeff.s_of_int n
+    | Float f -> Apron.Coeff.s_of_float f
+    | _ -> Errors.fatal [Lexing.dummy_pos] "Unexpected non int or float coeff in linear expression"
+  in
+  let coefs = List.map (fun (x, c) ->
+    coeff_of_literal c, Apron.Var.of_string x) e.terms in
+  Apron.Linexpr1.set_list line coefs (Some (coeff_of_literal e.constant));
   line
 
 

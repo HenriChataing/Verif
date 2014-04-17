@@ -65,6 +65,7 @@ rule token = parse
   (** Identifiers. *)
   | lid as s { LID s }
   | ['0'-'9']+ as s { NUM (int_of_string s) }
+  | ['0'-'9']+ '.' ['0'-'9']+ as s { DEC (float_of_string s) }
   | infix0 symbolchar* as s      { INFIX0 s }
   | infix1 symbolchar* as s      { INFIX1 s }
   | infix2 symbolchar* as s      { INFIX2 s }
