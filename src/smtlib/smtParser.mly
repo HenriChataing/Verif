@@ -17,8 +17,8 @@
 %token<string> DEC BIN HEX STR
 
 (** Keywords. *)
-%token LET FORALL EXISTS PAR BANG AS
-%token NUMERAL DECIMAL STRING
+%token LET FORALL EXISTS BANG AS
+(* %token NUMERAL DECIMAL STRING PAR *)
 %token SETLOGIC EXIT
 %token DECLAREFUN DEFINEFUN DECLARESORT DEFINESORT
 %token ASSERT GETASSERTIONS CHECKSAT
@@ -70,8 +70,8 @@ command:
 | LPAREN SETINFO k=keyword RPAREN { SetInfo (k,()) }
 | LPAREN EXIT RPAREN { Exit }
 
-%inline symbol: s=SYMBOL { Symbol s }
-%inline keyword: k=KEYWORD { Keyword k }
+symbol: s=SYMBOL { Symbol s }
+keyword: k=KEYWORD { Keyword k }
 
 sort_list:
   /*empty*/ { [] }

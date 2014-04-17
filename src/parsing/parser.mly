@@ -32,6 +32,8 @@
 %right INFIX1
 %left INFIX2 MINUS
 %left INFIX3
+%nonassoc RPAREN
+%nonassoc ELSE
 
 %start<Syntax.block> program
 
@@ -95,7 +97,7 @@ atom:
 | id=LID { Var (lex_join $startpos $endpos, { name = id; ptype = TypeInt }) }
 | LPAREN e=expression RPAREN { e }
 
-%inline ptype:
+ptype:
   INT { TypeInt }
 | BOOL { TypeBool }
 | FLOAT { TypeFloat }
