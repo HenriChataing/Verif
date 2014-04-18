@@ -48,6 +48,9 @@ module Expr = struct
 end
 
 
+open Expr
+
+
 (** Linear expressions. *)
 module Linexpr = struct
 
@@ -76,36 +79,18 @@ module Linexpr = struct
     { terms = ts0;
       constant = Literal.add e0.constant e1.constant }
 
-
   (** Multiply a linear expression by a constant. *)
   let mul (e: t) (a: Literal.t): t =
     { terms = List.map (fun (v,c) -> (v, Literal.mul a c)) e.terms;
       constant = Literal.mul a e.constant }
 
-
   (** Substract two linear expressions. *)
   let sub (e0: t) (e1: t): t =
     add e0 (mul e1 (Int (-1)))
 
-
+  (** Negation. *)
   let minus (e: t): t =
     mul e (Int (-1))
-
-
-  (** Normalize a comparison between linear expressions. *)
-  let comp (p: Positions.position) (op: string) (e0: t) (e1: t): (t * string) =
-    match op with
-    | "<=" -> (sub e1 e0, ">=") | "<" -> (sub e1 e0, ">")
-    | "==" | "!=" | ">=" | ">" -> (sub e0 e1, op)
-    | _ -> Errors.fatal' p ("Illegal operator " ^ op)
- 
-
-  (** Reverse a comparison. *)
-  let rev (e,op: t * string): t * string =
-    match op with
-    | ">" ->  (minus e, ">=") | ">=" -> (minus e, ">")
-    | "==" -> (e, "!=") | "!=" -> (e, "==")
-    | _ -> assert false (* Other operators eliminated by function 'comp' *)
 
 
   (** Printing. *)
@@ -129,7 +114,23 @@ module Linexpr = struct
     in
     if pe = "" then "0" else pe
 
+
+  (** Conversion of expressions to linear expressions.
+      Any non linear expression raises an error. *)
+  let rec of_expr (e: Expr.t): t =
+    match e with
+    | Var (p, v) -> 
+        { terms = [v.name, Int 1]; constant = Int 0 }
+    | Binary (_, "+", e0, e1) -> add (of_expr e0) (of_expr e1)
+    | Binary (_, "-", e0, e1) -> add (of_expr e0) (minus (of_expr e1))
+    | Binary (_, "*", e, Prim (_, a)) -> mul (of_expr e) a
+    | Binary (_, "*", Prim (_, a), e) -> mul (of_expr e) a
+    | Unary (_, "-", e) -> minus (of_expr e)
+    | Prim (_, a) -> { terms = []; constant = a }
+    | _ -> Errors.fatal' (Expr.position e) "This expression is not linear"
+
 end
+
 
 
 (** Boolean expressions. *)
@@ -152,7 +153,6 @@ module Bexpr = struct
     | _, Conj bs -> Conj (e0::bs)
     | _ -> Conj [e0;e1]
 
-
   (** Or operator. *)
   let bor (e0: 'a t) (e1: 'a t): 'a t =
     match (e0, e1) with
@@ -163,41 +163,80 @@ module Bexpr = struct
     | _, Disj bs -> Disj (e0::bs)
     | _ -> Disj [e0;e1] 
 
-
   (** Neg operator. *)
-  let rec bnot (fnot: 'a -> 'a) (e: 'a t): 'a t =
+  let rec bnot (fnot: 'a -> 'a t) (e: 'a t): 'a t =
     match e with
     | Top -> Bot | Bot -> Top
     | Conj bs -> Disj (List.map (bnot fnot) bs)
     | Disj bs -> Conj (List.map (bnot fnot) bs)
-    | Atom a -> Atom (fnot a)
+    | Atom a -> fnot a
+
+  (** Normalize a comparison between linear expressions. *)
+  let comp
+      (p: Positions.position)
+      (op: string)
+      (e0: Linexpr.t)
+      (e1: Linexpr.t): (Linexpr.t * string) t =
+    match op with
+    | "<=" -> Atom (Linexpr.sub e1 e0, ">=") | "<" -> Atom (Linexpr.sub e1 e0, ">") 
+    | "==" | ">=" | ">" -> Atom (Linexpr.sub e0 e1, op)
+    | "!=" ->
+       let e = Linexpr.sub e0 e1 in
+       Disj [
+         Atom (e, ">");
+         Atom (Linexpr.minus e, ">")
+       ]
+    | _ -> Errors.fatal' p ("Illegal operator " ^ op)
+
+  (** Reverse a comparison. *)
+  let rev (e,op: Linexpr.t * string): (Linexpr.t * string) t =
+    match op with
+    | ">" ->  Atom (Linexpr.minus e, ">=")
+    | ">=" -> Atom (Linexpr.minus e, ">")
+    | "==" -> Disj [Atom (e, ">"); Atom (Linexpr.minus e, ">")]
+    | _ -> assert false (* Other operators eliminated by function 'comp' *)
 
 
   (** Printing. *)
   let rec to_string (string_of_a: 'a -> string) (e: 'a t): string =
     let pdisj e =
       match e with
-      | Disj _ -> "(" ^ to_string string_of_a e ^ ")" 
+      | Disj (_::_) -> "(" ^ to_string string_of_a e ^ ")" 
       | _ -> to_string string_of_a e
     in
     let pconj e =
       match e with
-      | Conj _ -> "(" ^ to_string string_of_a e ^ ")" 
+      | Conj (_::_) -> "(" ^ to_string string_of_a e ^ ")" 
       | _ -> to_string string_of_a e
     in
 
     match e with
     | Top -> "true" | Bot -> "false"
     | Atom a -> string_of_a a
-    | Conj bs ->
+    | Conj [] -> "" | Conj [b] -> to_string string_of_a b
+    | Conj (b::bs) ->
         List.fold_left (fun s b ->
-          if s = "" then pdisj b
-          else s ^ " && " ^ pdisj b
-        ) "" bs
-    | Disj bs ->
+          s ^ " && " ^ pdisj b
+        ) (pdisj b) bs
+    | Disj [] -> "" | Disj [b] -> to_string string_of_a b
+    | Disj (b::bs) ->
         List.fold_left (fun s b ->
-          if s == "" then pconj b
-          else s ^ " || " ^ pconj b
-        ) "" bs
+          s ^ " || " ^ pconj b
+        ) (pconj b) bs
+
+
+  (** Conversion of expressions to boolean expressions.
+      Any non boolean expression raises an error. *)
+  let rec of_expr (e: Expr.t): (Linexpr.t * string) t =
+    match e with
+    | Binary (_, "&&", e0, e1) -> band (of_expr e0) (of_expr e1)
+    | Binary (_, "||", e0, e1) -> bor (of_expr e0) (of_expr e1)
+    | Binary (p, op, e0, e1) ->
+        let le0 = Linexpr.of_expr e0
+        and le1 = Linexpr.of_expr e1 in
+        comp p op le0 le1
+    | Prim (_, Bool b) -> if b then Top else Bot
+    | _ -> Errors.fatal' (Expr.position e) "This expression is not boolean"
 
 end
+

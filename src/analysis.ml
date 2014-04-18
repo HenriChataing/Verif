@@ -41,7 +41,8 @@ let make_linexpr (env: Apron.Environment.t) (e: Linexpr.t): Apron.Linexpr1.t =
 (** Translate a constraint. *)
 let make_constraint (env: Apron.Environment.t) (e,op: Linexpr.t * string): Apron.Lincons1.earray =
   let typ = match op with
-    | "==" -> Apron.Lincons1.EQ | "!=" -> Apron.Lincons1.DISEQ
+    | "==" -> Apron.Lincons1.EQ
+    | "!=" -> Errors.fatal [Lexing.dummy_pos] "Unsupported operation !="
     | ">=" -> Apron.Lincons1.SUPEQ | ">" -> Apron.Lincons1.SUP | _ -> assert false
   in
   let line = make_linexpr env e in
@@ -123,11 +124,16 @@ let rec with_cond
   | Conj bs ->
       List.fold_left (fun d b ->
         with_cond man env b d) d bs
-  | Disj bs ->
+  | Disj [] -> d
+  | Disj [b] ->
+      with_cond man env b d
+  | Disj (b::bs) ->
       List.fold_left (fun d' b ->
-        Apron.Abstract1.join man d' (with_cond man env b d)) d bs
+        Apron.Abstract1.join man d' (with_cond man env b d)
+      ) (with_cond man env b d) bs
   | Atom c ->
       Apron.Abstract1.meet_lincons_array man d c
+
 
 (* Compute the effect of a command on an abstract value. *)
 let with_command
@@ -180,7 +186,8 @@ let perform_analysis
         | None ->
             (* Finished gathering the results from the predecessor labels. *)
             if info.marker = List.length info.cfg_info.predecessors then begin
-              info.value <- None; 
+              (* For the purpose of checking the condition, keep the value. *)
+              if info.cfg_info.goal_condition = None then info.value <- None; 
               iterate l1 lims d1
             (* Still gathering results. *)
             end else
@@ -235,6 +242,28 @@ let perform_analysis
   with Not_found -> assert false
 
 
+(** Check whether the goal conditions are respected. *)
+let check_goals
+    (man: 'a Apron.Manager.t)
+    (env: Apron.Environment.t)
+    (state: 'a abstract_state): unit =
+  for i=0 to Array.length state - 1 do
+    match state.(i).value, state.(i).cfg_info.goal_condition with
+    | Some d, Some b ->
+        let d' = with_cond man env b d in
+        print_string ("L" ^ string_of_int i ^ ": ");
+        if Apron.Abstract1.is_bottom man d' then
+          print_string "condition respected"
+        else begin
+          print_string "false condition; with the values ";
+          Apron.Abstract1.print Format.std_formatter d';
+          Format.pp_print_flush Format.std_formatter ()
+        end;
+        print_newline ()
+    | _ -> ()
+  done
+
+
 (** Put everything together, and perform an analysis of a control flow graph. *)
 let analyze (cfg: Linexpr.t Cfg.t): (Polka.loose Polka.t) abstract_state =
   (* Creation of the manager. *)
@@ -245,6 +274,8 @@ let analyze (cfg: Linexpr.t Cfg.t): (Polka.loose Polka.t) abstract_state =
   let state = make_initial_state man env cfg in
   (* Analysis. *)
   perform_analysis man env state;
+  (* Check the goals. *)
+  check_goals man env state;
   state
 
 

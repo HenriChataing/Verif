@@ -28,7 +28,8 @@ module LabelMap = Map.Make (LABEL)
 
 type ('e, 'b) label_info = {
   mutable loop_header: label option;                       (* Identify widening points. *)
-  mutable goal_condition: ('b Bexpr.t) option;             (* A condition to prove. *)
+  (* A condition to prove. Rather than the condition itself, its negation is kept. *)
+  mutable goal_condition: ('b Bexpr.t) option;
   mutable successors: (('e, 'b) command * label) list;
   mutable predecessors: label list
 }
@@ -43,34 +44,6 @@ type 'e t = {
   size: int
 }
 
-
-(** Conversion of expressions to linear expressions.
-    Any non linear expression raises an error. *)
-let rec to_linexpr (e: Expr.t): Linexpr.t =
-  match e with
-  | Var (p, v) -> 
-      { terms = [v.name, Int 1]; constant = Int 0 }
-  | Binary (_, "+", e0, e1) -> add (to_linexpr e0) (to_linexpr e1)
-  | Binary (_, "-", e0, e1) -> add (to_linexpr e0) (minus (to_linexpr e1))
-  | Binary (_, "*", e, Prim (_, a)) -> mul (to_linexpr e) a
-  | Binary (_, "*", Prim (_, a), e) -> mul (to_linexpr e) a
-  | Unary (_, "-", e) -> minus (to_linexpr e)
-  | Prim (_, a) -> { terms = []; constant = a }
-  | _ -> Errors.fatal' (Expr.position e) "This expression is not linear"
-
-
-(** Conversion of expressions to boolean expressions.
-    Any non boolean expression raises an error. *)
-let rec to_bexpr (e: Expr.t): (Linexpr.t * string) Bexpr.t =
-  match e with
-  | Binary (_, "&&", e0, e1) -> band (to_bexpr e0) (to_bexpr e1)
-  | Binary (_, "||", e0, e1) -> bor (to_bexpr e0) (to_bexpr e1)
-  | Binary (p, op, e0, e1) ->
-      let le0 = to_linexpr e0
-      and le1 = to_linexpr e1 in
-      Atom (comp p op le0 le1)
-  | Prim (_, Bool b) -> if b then Top else Bot
-  | _ -> Errors.fatal' (Expr.position e) "This expression is not boolean"
 
 (** Construction of the graph. *)
 
@@ -102,14 +75,15 @@ let set_loop_header (l: label) (lexit: label) (cfg: 'e cfg): unit =
   with Not_found ->
     assert false
 
-(* Add a goal to a label. *)
+(* Add a goal (negated) to a label. *)
 let add_goal (l: label) (goal: ('e * string) Bexpr.t) (cfg: 'e cfg): unit =
   try
     let info = LabelMap.find l cfg in
+    let goal = Bexpr.bnot Bexpr.rev goal in
     match info.goal_condition with
     | None -> info.goal_condition <- Some goal
-    | Some (Conj bs) -> info.goal_condition <- Some (Conj (goal::bs))
-    | Some b -> info.goal_condition <- Some (Conj [b; goal])
+    | Some (Disj bs) -> info.goal_condition <- Some (Disj (goal::bs))
+    | Some b -> info.goal_condition <- Some (Disj [b; goal])
   with Not_found ->
     assert false
 
@@ -132,20 +106,20 @@ let rec insert_instruction
   | Declare (p, x, Some e) ->
       insert_instruction l0 l1 (Syntax.Assign (p, x, e)) cfg
   | Syntax.Assign (p, x, e) ->
-      insert l0 (Assign (x, to_linexpr e), l1) cfg;
+      insert l0 (Assign (x, Linexpr.of_expr e), l1) cfg;
       cfg
 
   | If (p, e, (p0, b0), None) ->
-      let e = to_bexpr e in
+      let e = Bexpr.of_expr e in
       let cfg = insert_branch l0 l1 (Cond e) (p0, b0) cfg in
       insert l0 (Cond (bnot rev e), l1) cfg;
       cfg 
   | If (p, e, (p0,b0), Some (p1, b1)) ->
-      let e = to_bexpr e in
+      let e = Bexpr.of_expr e in
       let cfg = insert_branch l0 l1 (Cond e) (p0, b0) cfg in
       insert_branch l0 l1 (Cond (bnot rev e)) (p1, b1) cfg
   | While (p, e, (p',b)) ->
-      let e = to_bexpr e in
+      let e = Bexpr.of_expr e in
       break_label := l1;
       continue_label := l0;
       set_loop_header l0 l1 cfg;
@@ -154,12 +128,12 @@ let rec insert_instruction
   
   (* Assertions are turned into conditional jumps. *)
   | Assert (p, e) ->
-      let e = to_bexpr e in
+      let e = Bexpr.of_expr e in
       insert l0 (Cond e, l1) cfg;
       cfg
   (* Goal conditions are inserted into the label's information. *)
   | Prove (p, e) ->
-      let e = to_bexpr e in
+      let e = Bexpr.of_expr e in
       add_goal l0 e cfg;
       cfg
 
@@ -189,8 +163,11 @@ and insert_block (l0: label) (l1: label) (is: instruction list) (cfg: Linexpr.t 
       insert_block l0 l1 is cfg
   (* Goal conditions are inserted into the label's information. *)
   | (Prove (p, e))::is ->
-      add_goal l0 (to_bexpr e) cfg;
+      add_goal l0 (Bexpr.of_expr e) cfg;
       insert_block l0 l1 is cfg
+  | i::[Prove (p,e)] ->
+      add_goal l1 (Bexpr.of_expr e) cfg;
+      insert_instruction l0 l1 i cfg
   | [i] -> insert_instruction l0 l1 i cfg
   | i::(Break _)::_ -> insert_instruction l0 !break_label i cfg
   | i::(Continue _)::_ -> insert_instruction l0 !continue_label i cfg
@@ -230,9 +207,16 @@ let string_of_command (c: (Linexpr.t, Linexpr.t * string) command): string =
   | Assign (x,e) -> x.name ^ " = " ^ Linexpr.to_string e
 
 let print_cfg (cfg: Linexpr.t t): unit =
+  let string_of_a (e,op) = Linexpr.to_string e ^ " " ^ op ^ " 0" in
   Array.iteri (fun l info ->
     print_string ("L" ^ string_of_int l ^ ":");
     print_newline ();
+    begin match info.goal_condition with
+    | None -> ()
+    | Some e ->
+        print_string ("  ngoal: " ^ Bexpr.to_string string_of_a e);
+        print_newline ();
+    end;
     List.iter (fun (c, l1) ->
       print_string ("  " ^ string_of_command c ^ " -> " ^ string_of_label l1);
       print_newline ()
