@@ -124,7 +124,7 @@ let rec with_cond
   | Conj bs ->
       List.fold_left (fun d b ->
         with_cond man env b d) d bs
-  | Disj [] -> d
+  | Disj [] (* Same as Top *) -> d
   | Disj [b] ->
       with_cond man env b d
   | Disj (b::bs) ->
@@ -155,17 +155,8 @@ let perform_analysis
     (env: Apron.Environment.t)
     (state: 'a abstract_state): unit =
   try
-    (* Reset all the markers until the label l1. *)
-    let rec reset_markers (l0: label) (l1: label): unit =
-      let info = state.(l0.id) in
-      if info.marker != 0 then begin
-        info.marker <- 0;
-        info.value <- None;
-        if l0 != l1 then List.iter (fun (_,l) -> reset_markers l l1) info.cfg_info.successors
-      end
-
     (* Join on a label. *)
-    and join_and_continue
+    let rec join_and_continue
         (onlyjoin: bool)
         (l1: label) (lims: label option * label option)
         (d0: 'a Apron.Abstract1.t): unit =
@@ -186,17 +177,21 @@ let perform_analysis
         | None ->
             (* Finished gathering the results from the predecessor labels. *)
             if info.marker = List.length info.cfg_info.predecessors then begin
-              (* For the purpose of checking the condition, keep the value. *)
-              if info.cfg_info.goal_condition = None then info.value <- None; 
+              (* For the purpose of checking the goal condition, keep the value. *)
+              if info.cfg_info.goal_condition = None then info.value <- None;
+              (* Reset the counter. *)
+              info.marker <- 0;
+              (* Resume. *)
               iterate l1 lims d1
             (* Still gathering results. *)
             end else
               info.value <- Some d1
-        | Some le -> 
+        | Some le ->
+            (* Stabilize the loop before continuing. *) 
             find_loop_invariant l1 le d1;
             begin match state.(le.id).value with
             | None -> ()
-            | Some d -> iterate le lims d
+            | Some d -> (* Jump at the loop exit. *) iterate le lims d
             end
       end
 
@@ -216,7 +211,7 @@ let perform_analysis
       and invariant = ref (Apron.Abstract1.bottom man env)
       and d = ref d0 in
       while not (Apron.Abstract1.is_eq man !d !invariant) do
-        reset_markers l0 l1; info.marker <- 1; info.value <- Some d0;
+        state.(l1.id).marker <- 0; info.value <- Some d0;
         iterate l0 (Some l0, Some l1) !d;
         invariant := !d;
         d := (match info.value with Some d -> d | None -> !d);
@@ -224,12 +219,12 @@ let perform_analysis
         d := Apron.Abstract1.widening man !invariant !d
       done;
       (* Refine the invariant, by doing another loop iteration. *)
-      reset_markers l0 l1; info.marker <- 1; info.value <- Some d0;
+      state.(l1.id).marker <- 0; info.value <- Some d0;
       iterate l0 (Some l0, Some l1) !invariant;
       invariant := (match info.value with None -> !invariant | Some d -> d);
 
       (* Compute the value at the exit point (another loop iteration). *)
-      reset_markers l0 l1; info.marker <- 1; info.value <- None;
+      state.(l1.id).marker <- 0; info.value <- None;
       iterate l0 (Some l0, Some l1) !invariant;
 
       (* Final settings. *)
