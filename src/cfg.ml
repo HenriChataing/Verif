@@ -27,6 +27,7 @@ end
 module LabelMap = Map.Make (LABEL)
 
 type ('e, 'b) label_info = {
+  position: Lexing.position;                               (* The position in the file. *)
   mutable loop_header: label option;                       (* Identify widening points. *)
   (* A condition to prove. Rather than the condition itself, its negation is kept. *)
   mutable goal_condition: ('b Bexpr.t) option;
@@ -51,6 +52,7 @@ type 'e t = {
    The boolean flag identifies loop headers. *)
 let init_label (l: label) (cfg: 'e cfg): 'e cfg =
   LabelMap.add l {
+    position = l.Labels.position;
     loop_header = None;
     goal_condition = None;
     successors = [];
@@ -187,6 +189,7 @@ let build_cfg (p,b: block): Linexpr.t t =
   let cfg = insert_block l0 l1 b cfg in
   (* Make it an array. *)
   let arr = Array.make (LabelMap.cardinal cfg) {
+    position = Lexing.dummy_pos;
     loop_header = None;
     goal_condition = None;
     successors = [];
@@ -209,16 +212,25 @@ let string_of_command (c: (Linexpr.t, Linexpr.t * string) command): string =
 let print_cfg (cfg: Linexpr.t t): unit =
   let string_of_a (e,op) = Linexpr.to_string e ^ " " ^ op ^ " 0" in
   Array.iteri (fun l info ->
-    print_string ("L" ^ string_of_int l ^ ":");
-    print_newline ();
+    let plbl = "L" ^ string_of_int l ^ ": " in
+    let pspc = String.make (String.length plbl) ' ' in
+    let lblok = ref false in
+    print_string plbl;
     begin match info.goal_condition with
     | None -> ()
     | Some e ->
-        print_string ("  ngoal: " ^ Bexpr.to_string string_of_a e);
+        lblok := true;
+        print_string ("ngoal: " ^ Bexpr.to_string string_of_a e);
         print_newline ();
     end;
     List.iter (fun (c, l1) ->
-      print_string ("  " ^ string_of_command c ^ " -> " ^ string_of_label l1);
+      if !lblok then
+        print_string pspc
+      else begin
+        lblok := true;
+        print_string plbl
+      end;
+      print_string (string_of_command c ^ " -> " ^ string_of_label l1);
       print_newline ()
     ) info.successors
   ) cfg.labels

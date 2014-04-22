@@ -1,9 +1,8 @@
 (** Command line options parsing. *)
 
-let verbose = ref false
-
 let options = Arg.align [
-  ("-v", Arg.Unit (fun _ -> verbose := true), "toggle verbose mode")
+  ("-v", Arg.Unit (fun _ -> Logger.set_verbose 1), "toggle verbose mode");
+  ("--verbose", Arg.Int (fun v -> Logger.set_verbose v), "set verbose level")
 ]
 
 let message = "Usage: verif [options] input_file"

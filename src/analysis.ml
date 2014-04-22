@@ -66,12 +66,11 @@ type 'a abstract_state = ('a abstract_info) array
 (** Display the result of the analysis. *)
 let print_abstract (state: 'a abstract_state): unit =
   Array.iteri (fun l info ->
-    print_string ("L" ^ string_of_int l ^ ": ");
-    if info.cfg_info.loop_header != None then print_string "loop";
-    print_newline ();
     match info.value with
     | None -> ()
     | Some d ->
+        print_string ("L" ^ string_of_int l ^ ": ");
+        if info.cfg_info.loop_header != None then print_string "loop invariant ";
         Apron.Abstract1.print Format.std_formatter d;
         Format.pp_print_flush Format.std_formatter ();
         print_newline ()
@@ -200,6 +199,10 @@ let perform_analysis
         (l0: label)
         (lentry, lexit: label option * label option)
         (d0: 'a Apron.Abstract1.t): unit =
+      (* Debugging. *)
+      Logger.log ~lvl:2 ("Iterate L" ^ string_of_int l0.id ^ ": ");
+      Logger.loga ~lvl:2 d0; Logger.newline ~lvl:2 (); Logger.flush();
+
       List.iter (fun (c, l1) ->
         let d1 = with_command man env c d0 in
         join_and_continue (Some l1 = lexit || Some l1 = lentry) l1 (lentry,lexit) d1
@@ -207,6 +210,10 @@ let perform_analysis
 
     (* Find the loop invariant. *)
     and find_loop_invariant (l0: label) (l1: label) (d0: 'a Apron.Abstract1.t): unit =
+      (* Debugging. *)
+      Logger.log ~lvl:2 ("Stabilize L" ^ string_of_int l0.id ^ " -> L" ^ string_of_int l1.id ^ ": ");
+      Logger.loga ~lvl:2 d0; Logger.newline ~lvl:2 (); Logger.flush ();
+
       let info = state.(l0.id)
       and invariant = ref (Apron.Abstract1.bottom man env)
       and d = ref d0 in
@@ -246,7 +253,8 @@ let check_goals
     match state.(i).value, state.(i).cfg_info.goal_condition with
     | Some d, Some b ->
         let d' = with_cond man env b d in
-        print_string ("L" ^ string_of_int i ^ ": ");
+        print_string (state.(i).cfg_info.position.Lexing.pos_fname ^ ":" ^
+                      Positions.string_of_lex_pos state.(i).cfg_info.position ^ ": ");
         if Apron.Abstract1.is_bottom man d' then
           print_string "condition respected"
         else begin

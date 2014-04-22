@@ -3,7 +3,7 @@ GENERATED = \
 	parsing/parser.ml parsing/lexer.ml
 
 MODULES = \
-	common/positions common/literal common/types \
+	common/logger common/positions common/literal common/types \
 	errors options \
 	smtlib/smtSyntax \
 	smtlib/smtTokens \
