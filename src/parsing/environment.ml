@@ -116,33 +116,33 @@ let rec typecheck_expr (e: Expr.t) (expected: ptype): Expr.t =
   | _ -> e
 
 (** Type checking and scope analysis, in an instruction. *)
-let rec typecheck_instruction (i: instruction): instruction =
+let rec typecheck_instruction (i: instruction): instruction option =
   match i with
   | Declare (p, x, None) ->
-      let x' = create_var x.name x.ptype in
-      Declare (p, x', None)
+      let _ = create_var x.name x.ptype in
+      None
   | Declare (p, x, Some e) ->
       let e' = typecheck_expr e x.ptype
       and x' = create_var x.name x.ptype in
-      Declare (p, x', Some e')
+      Some (Assign (p, x',e'))
   | Assign (p, x, e) ->
       let x' = find_var p x.name in
       let e' = typecheck_expr e x'.ptype in
-      Assign (p, x', e')
+      Some (Assign (p, x', e'))
   | If (p, e, (p0, b0), None) ->
       let e' = typecheck_expr e TypeBool
       and b0' = in_scope (fun _ -> typecheck_block b0) in
-      If (p, e', (p0, b0'), None)
+      Some (If (p, e', (p0, b0'), None))
   | If (p, e, (p0, b0), Some (p1, b1)) ->
       let e' = typecheck_expr e TypeBool
       and b0' = in_scope (fun _ -> typecheck_block b0)
       and b1' = in_scope (fun _ -> typecheck_block b1) in
-      If (p, e', (p0, b0'), Some (p1, b1'))
+      Some (If (p, e', (p0, b0'), Some (p1, b1')))
   | While (p, e, (p0, b0)) ->
       let e' = typecheck_expr e TypeBool
       and b0' = in_scope (fun _ -> typecheck_block b0) in
-      While (p, e', (p0, b0'))
-  | _ -> i
+      Some (While (p, e', (p0, b0')))
+  | _ -> Some i
 
 (** Type checking and scope analysis of a block. *)
 and typecheck_block (is: instruction list): instruction list =
@@ -153,7 +153,9 @@ and typecheck_block (is: instruction list): instruction list =
   | i::is ->
       let i' = typecheck_instruction i
       and is' = typecheck_block is in
-      i'::is'
+      match i' with
+      | None -> is'
+      | Some i' -> i'::is'
 
 (** Type checking and scope analysis of a program. *)
 let typecheck (p,b: block): block =

@@ -21,6 +21,14 @@ module Expr = struct
   | Unary of position * string * t
 
 
+  (** Return the free variables of an expression. *)
+  let rec freevar (e: t): var list =
+    match e with
+    | Var (_, x) -> [x] | Prim _ -> [] 
+    | Binary (_, _, e0, e1) -> freevar e0 @ freevar e1
+    | Unary (_, _, e) -> freevar e
+
+
   (** Printing. *)
   let rec to_string (e: t): string =
     let parens_string_of_expression e =
@@ -91,6 +99,26 @@ module Linexpr = struct
   (** Negation. *)
   let minus (e: t): t =
     mul e (Int (-1))
+
+  (** Replace a subset of the variables by other linear expressions. *)
+  let subs (sub: (var * t) list) (e: t): t =
+    List.fold_left (fun ans (x, l) ->
+      try
+        let _, le = List.find (fun (v, _) -> v.name = x) sub in
+        add ans (mul le l)
+      with Not_found -> 
+        add ans { terms = [x,l]; constant = Int 0 }
+    ) { terms = []; constant = e.constant } e.terms
+
+
+  (** Rename the variables. *)
+  let rename (renaming: (var * var) list) (e: t): t =
+    { e with terms = List.map (fun (x, l) ->
+        try
+          let (_, x') = List.find (fun (v,_) -> v.name = x) renaming in
+          x'.name, l
+        with Not_found -> x, l
+      ) e.terms }
 
 
   (** Printing. *)

@@ -90,8 +90,14 @@ let make_initial_state
         successors = List.map (fun (c, l) ->
           (match c with
            | Cond b -> Cond (bconvert b)
-           | Assign (x, e) -> Assign (x, make_linexpr env e)), l
+           | Assign xs -> Assign (List.map (fun (x, e) -> x, make_linexpr env e) xs)), l
           ) info.successors;
+        predecessors = List.map (fun (c, l) ->
+          (match c with
+           | Cond b -> Cond (bconvert b)
+           | Assign xs -> Assign (List.map (fun (x, e) -> x, make_linexpr env e) xs)), l
+          ) info.successors;
+
         goal_condition =
           match info.goal_condition with
           | None -> None
@@ -142,9 +148,10 @@ let with_command
     (d: 'a Apron.Abstract1.t): 'a Apron.Abstract1.t =
   match c with
   | Cond b -> with_cond man env b d
-  | Assign (x, e) ->
-      let v = Apron.Var.of_string x.name in
-      Apron.Abstract1.assign_linexpr man d v e None
+  | Assign xes ->
+      let vs = List.map (fun (x, _) -> Apron.Var.of_string x.name) xes
+      and es = List.map snd xes in
+      Apron.Abstract1.assign_linexpr_array man d (Array.of_list vs) (Array.of_list es) None
 
 
 (** Abstract interpretation. Starting from the loop headers (and the initial program point),

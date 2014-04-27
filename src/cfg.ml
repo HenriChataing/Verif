@@ -13,8 +13,10 @@ open Linexpr
 
 (** Edges of the graph are labelled by commands. *)
 type ('e, 'b) command =
+  (* Conditional jump. *)
     Cond of 'b Bexpr.t
-  | Assign of var * 'e
+  (* Parallel assignment of variables. *)
+  | Assign of (var * 'e) list
 
 
 (** Description of the graph. *)
@@ -32,7 +34,7 @@ type ('e, 'b) label_info = {
   (* A condition to prove. Rather than the condition itself, its negation is kept. *)
   mutable goal_condition: ('b Bexpr.t) option;
   mutable successors: (('e, 'b) command * label) list;
-  mutable predecessors: label list
+  mutable predecessors: (('e, 'b) command * label) list
 }
 
 type 'e cfg = ('e, 'e * string) label_info LabelMap.t
@@ -64,7 +66,7 @@ let insert (l0: label) (c,l1: ('e, 'e * string) command * label) (cfg: 'e cfg): 
   try
     let info0 = LabelMap.find l0 cfg
     and info1 = LabelMap.find l1 cfg in
-    info1.predecessors <- l0::info1.predecessors;
+    info1.predecessors <- (c, l0)::info1.predecessors;
     info0.successors <- (c,l1)::info0.successors
   with Not_found ->
     assert false
@@ -108,7 +110,7 @@ let rec insert_instruction
   | Declare (p, x, Some e) ->
       insert_instruction l0 l1 (Syntax.Assign (p, x, e)) cfg
   | Syntax.Assign (p, x, e) ->
-      insert l0 (Assign (x, Linexpr.of_expr e), l1) cfg;
+      insert l0 (Assign [x, Linexpr.of_expr e], l1) cfg;
       cfg
 
   | If (p, e, (p0, b0), None) ->
@@ -171,8 +173,31 @@ and insert_block (l0: label) (l1: label) (is: instruction list) (cfg: Linexpr.t 
       add_goal l1 (Bexpr.of_expr e) cfg;
       insert_instruction l0 l1 i cfg
   | [i] -> insert_instruction l0 l1 i cfg
+  (* Intercept break and continue *)
   | i::(Break _)::_ -> insert_instruction l0 !break_label i cfg
   | i::(Continue _)::_ -> insert_instruction l0 !continue_label i cfg
+  (* Intersect consecutive parallel assignements. *)
+  | (Syntax.Assign (p,x,e))::is -> begin
+    let rec fold_assignments xs es is =
+      match is with
+      | [] -> (List.combine xs es), []
+      | (Syntax.Assign (p, x, e))::is' ->
+          let le = Linexpr.of_expr e in
+          let le = Linexpr.subs (List.combine xs es) le in
+          fold_assignments (x::xs) (le::es) is'
+      | _ -> (List.combine xs es), is
+    in
+    let ass, is = fold_assignments [x] [Linexpr.of_expr e] is in
+    match is with
+    | [] -> insert l0 (Assign ass, l1) cfg; cfg
+    | i::_ ->
+      let l2 = new_label (start_of_position (position_of_instruction i)) in
+      let cfg = init_label l2 cfg in
+      insert l0 (Assign ass, l2) cfg;
+      insert_block l2 l1 is cfg
+    end
+
+  (* Remaining cases. *)
   | i::is ->
       let l2 = new_label (end_of_position (position_of_instruction i)) in
       let cfg = init_label l2 cfg in
@@ -207,7 +232,12 @@ let string_of_command (c: (Linexpr.t, Linexpr.t * string) command): string =
   | Cond e ->
       let string_of_a (e,op) = Linexpr.to_string e ^ " " ^ op ^ " 0" in
       Bexpr.to_string string_of_a e ^ " ?"
-  | Assign (x,e) -> x.name ^ " = " ^ Linexpr.to_string e
+  | Assign ((x,e)::xs) ->
+      x.name ^ " = " ^ Linexpr.to_string e ^
+      List.fold_left (fun s (x,e) ->
+        s ^ "; " ^ x.name ^ " = " ^ Linexpr.to_string e
+      ) "" xs
+  | Assign [] -> ""
 
 let print_cfg (cfg: Linexpr.t t): unit =
   let string_of_a (e,op) = Linexpr.to_string e ^ " " ^ op ^ " 0" in
