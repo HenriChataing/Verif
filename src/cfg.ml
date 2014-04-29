@@ -245,11 +245,11 @@ let print_cfg (cfg: Linexpr.t t): unit =
     let plbl = "L" ^ string_of_int l ^ ": " in
     let pspc = String.make (String.length plbl) ' ' in
     let lblok = ref false in
-    print_string plbl;
     begin match info.goal_condition with
     | None -> ()
     | Some e ->
         lblok := true;
+        print_string plbl;
         print_string ("ngoal: " ^ Bexpr.to_string string_of_a e);
         print_newline ();
     end;

@@ -49,6 +49,7 @@ rule token = parse
   | "continue" { CONTINUE }
   | "true" { TRUE }
   | "false" { FALSE }
+  | "assert" { ASSERT }
 
   (** Punctuation. *)
 

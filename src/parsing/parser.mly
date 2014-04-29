@@ -31,7 +31,7 @@
 %token INT BOOL FLOAT
 %token BREAK CONTINUE
 %token TRUE FALSE
-
+%token ASSERT
 
 %left INFIX0
 %right INFIX1
@@ -79,6 +79,10 @@ instruction:
 | id=LID EQUALS e=expression SEMICOLON {
     Assign (lex_join $startpos $endpos, { name = id; ptype = TypeInt }, e)
   }
+| ASSERT LPAREN e=expression RPAREN SEMICOLON {
+    Assert (lex_join $startpos $endpos, e)
+  }
+
 
 block:
   ins=instruction {
