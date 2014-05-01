@@ -25,7 +25,7 @@ let symbolchar = ['a'-'z' 'A'-'Z' '0'-'9'
                   '&' '*' '_' '-' '+' '='
                   '<' '>' '.' '?' '/']
 
-let symbol = (symbolchar+ | '|' symbolchar+ '|')
+let symbol = (symbolchar+ | '|' [^'|']* '|')
 let keyword = ':' symbolchar+
 
 rule token = parse
@@ -81,12 +81,11 @@ rule token = parse
   | ('0' | ['1'-'9']['0'-'9']*) ['.'] ['0'-'9']+ as d { DEC d }
   | "#b" ['0' '1']+                              as b { BIN b }
   | "#x" ['0'-'9' 'A'-'F' 'a'-'f']+              as h { HEX h }
-  | symbol as s { SYMBOL s }
-  | keyword as k { KEYWORD k }
 
   (** Identifiers. *)
 
-  | symbol as s  { SYMBOL s }
+  | symbol as s { SYMBOL s }
+  | keyword as k { KEYWORD k }
 
   | _  { lexical_error lexbuf "Invalid character." }
 

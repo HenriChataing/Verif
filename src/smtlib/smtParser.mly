@@ -39,36 +39,38 @@ program: cs = nonempty_list(command) EOF {
 
 command:
   LPAREN SETLOGIC sym=symbol RPAREN {
-    SetLogic sym
+    SetLogic (lex_join $startpos $endpos, sym)
   }
 | LPAREN DECLAREFUN sym=symbol LPAREN args=sort_list RPAREN sort=sort RPAREN {
-    DeclareFun (sym,args,sort)
+    DeclareFun (lex_join $startpos $endpos, sym,args,sort)
   }
 | LPAREN DEFINEFUN sym=symbol LPAREN args=arg_list RPAREN sort=sort expr=expression RPAREN {
-    DefineFun (sym,args,sort,expr)
+    DefineFun (lex_join $startpos $endpos, sym,args,sort,expr)
   }
 | LPAREN DECLARESORT sym=symbol n=NUM RPAREN {
-    DeclareSort (sym,n)
+    DeclareSort (lex_join $startpos $endpos, sym,n)
   }
 | LPAREN DEFINESORT sym=symbol LPAREN syms=nonempty_list(symbol) RPAREN expr=expression RPAREN {
-    DefineSort (sym,syms,expr)
+    DefineSort (lex_join $startpos $endpos, sym,syms,expr)
   }
 | LPAREN ASSERT expr=expression RPAREN {
-    Assert expr
+    Assert (lex_join $startpos $endpos, expr)
   }
-| LPAREN GETASSERTIONS RPAREN { GetAssertions }
-| LPAREN CHECKSAT RPAREN { CheckSat }
-| LPAREN GETPROOF RPAREN { GetProof }
-| LPAREN GETUNSATCORE RPAREN { GetUnsatCore }
-| LPAREN GETVALUE exprs=nonempty_list(expression) RPAREN { GetValue exprs }
-| LPAREN GETASSIGNMENT RPAREN { GetAssignment }
-| LPAREN PUSH n=NUM RPAREN { Push n }
-| LPAREN POP n=NUM RPAREN { Pop n }
-| LPAREN GETOPTION k=keyword RPAREN { GetOption k }
-| LPAREN SETOPTION k=keyword RPAREN { SetOption (k,()) }
-| LPAREN GETINFO k=keyword RPAREN { GetInfo k }
-| LPAREN SETINFO k=keyword RPAREN { SetInfo (k,()) }
-| LPAREN EXIT RPAREN { Exit }
+| LPAREN GETASSERTIONS RPAREN { GetAssertions (lex_join $startpos $endpos) }
+| LPAREN CHECKSAT RPAREN { CheckSat (lex_join $startpos $endpos) }
+| LPAREN GETPROOF RPAREN { GetProof (lex_join $startpos $endpos) }
+| LPAREN GETUNSATCORE RPAREN { GetUnsatCore (lex_join $startpos $endpos) }
+| LPAREN GETVALUE exprs=nonempty_list(expression) RPAREN {
+    GetValue (lex_join $startpos $endpos, exprs)
+  }
+| LPAREN GETASSIGNMENT RPAREN { GetAssignment (lex_join $startpos $endpos) }
+| LPAREN PUSH n=NUM RPAREN { Push (lex_join $startpos $endpos, n) }
+| LPAREN POP n=NUM RPAREN { Pop (lex_join $startpos $endpos, n) }
+| LPAREN GETOPTION k=keyword RPAREN { GetOption (lex_join $startpos $endpos, k) }
+| LPAREN SETOPTION a=attribute RPAREN { SetOption (lex_join $startpos $endpos, a) }
+| LPAREN GETINFO k=keyword RPAREN { GetInfo (lex_join $startpos $endpos, k) }
+| LPAREN SETINFO a=attribute RPAREN { SetInfo (lex_join $startpos $endpos, a) }
+| LPAREN EXIT RPAREN { Exit (lex_join $startpos $endpos) }
 
 symbol: s=SYMBOL { Symbol s }
 keyword: k=KEYWORD { Keyword k }
@@ -120,11 +122,21 @@ constant:
 | s=STR { Str s }
 
 expression:
-  c=constant { Prim c }
-| qid=qidentifier { Ident qid }
-| LPAREN sym=qidentifier es=nonempty_list(expression) RPAREN { App (sym,es) }
-| LPAREN FORALL LPAREN sys=arg_list RPAREN e=expression RPAREN { Forall (sys,e) }
-| LPAREN EXISTS LPAREN sys=arg_list RPAREN e=expression RPAREN { Exists (sys,e) }
-| LPAREN LET LPAREN bs=bind_list RPAREN e=expression RPAREN { Let (bs,e) }
-| LPAREN BANG e=expression attrs=nonempty_list(attribute) RPAREN { Attribute (e,[]) }
+  c=constant { Prim (lex_join $startpos $endpos, c) }
+| qid=qidentifier { Ident (lex_join $startpos $endpos, qid) }
+| LPAREN sym=qidentifier es=nonempty_list(expression) RPAREN {
+    App (lex_join $startpos $endpos, sym,es)
+  }
+| LPAREN FORALL LPAREN sys=arg_list RPAREN e=expression RPAREN {
+    Forall (lex_join $startpos $endpos, sys,e)
+  }
+| LPAREN EXISTS LPAREN sys=arg_list RPAREN e=expression RPAREN {
+    Exists (lex_join $startpos $endpos, sys,e)
+  }
+| LPAREN LET LPAREN bs=bind_list RPAREN e=expression RPAREN {
+    Let (lex_join $startpos $endpos, bs,e)
+  }
+| LPAREN BANG e=expression attrs=nonempty_list(attribute) RPAREN {
+    Attribute (lex_join $startpos $endpos, e,[])
+  }
 

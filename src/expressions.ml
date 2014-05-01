@@ -19,7 +19,7 @@ module Expr = struct
   | Prim of position * Literal.t
   | Binary of position * string * t * t
   | Unary of position * string * t
-
+  | Clause of position * string * t list
 
   (** Return the free variables of an expression. *)
   let rec freevar (e: t): var list =
@@ -27,7 +27,21 @@ module Expr = struct
     | Var (_, x) -> [x] | Prim _ -> [] 
     | Binary (_, _, e0, e1) -> freevar e0 @ freevar e1
     | Unary (_, _, e) -> freevar e
+    | Clause (_,_, es) -> List.concat (List.map freevar es)
 
+  (** Replace a subset of the variables. *)
+  let rec subs (sub: (var * var) list) (e: t): t =
+    match e with
+    | Var (pos, x) ->
+        begin try
+          Var (pos, List.assoc x sub)
+        with Not_found ->
+          Var (pos, x)
+        end
+    | Prim _ -> e
+    | Binary (pos, op, e0, e1) -> Binary (pos, op, subs sub e0, subs sub e1)
+    | Unary (pos, op, e) -> Unary (pos, op, subs sub e)
+    | Clause (pos, op, es) -> Clause (pos, op, List.map (subs sub) es)
 
   (** Printing. *)
   let rec to_string (e: t): string =
@@ -46,13 +60,16 @@ module Expr = struct
     | Unary (_,op,e) ->
         let pe = parens_string_of_expression e in
         op ^ " " ^ pe
+    | Clause (_, c, []) ->
+        c ^ "()"
+    | Clause (_, c, e::es) ->
+        c ^ "(" ^ to_string e ^ List.fold_left (fun s e -> s ^ ", " ^ to_string e) "" es ^ ")"
 
   (** Return the position. *)
   let position (e: t): Positions.position =
     match e with
     | Var (p,_) | Prim (p,_)
-    | Binary (p,_,_,_) | Unary (p,_,_) -> p
-
+    | Binary (p,_,_,_) | Unary (p,_,_) | Clause (p,_,_) -> p
 end
 
 

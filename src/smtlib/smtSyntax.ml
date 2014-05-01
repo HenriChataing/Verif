@@ -1,5 +1,7 @@
 (** Syntax of SMT-lib v2. *)
 
+open Positions
+
 (** Symbols. *)
 type symbol = Symbol of string
 type keyword = Keyword of string
@@ -34,44 +36,53 @@ type attribute_value =
 
 type attribute = keyword * attribute_value option
 
-(** Type of expressions. *)
-type expression =
+(** Type of terms. *)
+type term =
     (* Group all the primitives together. *)
-    Prim of primitive
+    Prim of position * primitive
     (* Identifiers. *)
-  | Ident of qidentifier
+  | Ident of position * qidentifier
     (* Existential quantifiers. *)
-  | Exists of (symbol * sort) list * expression
+  | Exists of position * (symbol * sort) list * term
     (* Universal qantifiers. *)
-  | Forall of (symbol * sort) list * expression
+  | Forall of position * (symbol * sort) list * term
     (* Let-bindings. *)
-  | Let of (symbol * expression) list * expression
+  | Let of position * (symbol * term) list * term
     (* Function applications. *)
-  | App of qidentifier * expression list
+  | App of position * qidentifier * term list
     (* Expressions with attributes. *)
-  | Attribute of expression * attribute list
+  | Attribute of position * term * attribute list
+
+
+(** Return the position of a term. *)
+let position_of_term (t: term) =
+  match t with
+  | Prim (p, _) | Ident (p, _)
+  | Exists (p, _, _) | Forall (p, _, _)
+  | Let (p, _, _) | App (p, _, _)
+  | Attribute (p, _, _) -> p
 
 
 (** Type of standard SMTLib commands. *)
 type command =
-    SetLogic of symbol
-  | DeclareFun of symbol * sort list * sort
-  | DefineFun of symbol * (symbol * sort) list * sort * expression
-  | DeclareSort of symbol * int
-  | DefineSort of symbol * symbol list * expression
-  | Assert of expression
-  | GetAssertions
-  | CheckSat
-  | GetProof
-  | GetUnsatCore
-  | GetValue of expression list
-  | GetAssignment
-  | Push of int
-  | Pop of int
-  | GetOption of keyword
-  | SetOption of keyword * unit (* TODO Change the type of the operand. *)
-  | GetInfo of keyword
-  | SetInfo of keyword * unit (* TODO Change the type of the operand. *)
-  | Exit
+    SetLogic of position * symbol
+  | DeclareFun of position * symbol * sort list * sort
+  | DefineFun of position * symbol * (symbol * sort) list * sort * term
+  | DeclareSort of position * symbol * int
+  | DefineSort of position * symbol * symbol list * term
+  | Assert of position * term
+  | GetAssertions of position
+  | CheckSat of position
+  | GetProof of position
+  | GetUnsatCore of position
+  | GetValue of position * term list
+  | GetAssignment of position
+  | Push of position * int
+  | Pop of position * int
+  | GetOption of position * keyword
+  | SetOption of position * attribute
+  | GetInfo of position * keyword
+  | SetInfo of position * attribute
+  | Exit of position
 
 
