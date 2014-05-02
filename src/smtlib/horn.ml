@@ -11,6 +11,7 @@ let new_id () =
   incr id_count;
   !id_count - 1
 
+
 (* List of smtlib operators, each given an arity and the used representation. *)
 let operators = [
   "=", (2, "=="); "<>", (2, "<>");
@@ -23,11 +24,11 @@ let operators = [
 
 
 (** Partial definition of a horn clause. *)
-type hclause = {
-  id: int;                (* Unique identifier. *)
+type clause = {
+  cname: var;             (* The clause's name. *)
   variables: var list;    (* List of universaly quantified variables. *)
   preconds: Expr.t list;
-  postcond: string * var list
+  arguments: var list
 }
 
 
@@ -55,7 +56,7 @@ let ptype_of_sort (s: sort): ptype =
 let rec strip_foralls (t: term): var list * term =
   match t with
   | Forall (_, xs, t) ->
-      let xs = List.map (fun (Symbol s, t) -> { name = s; ptype = ptype_of_sort t }) xs in
+      let xs = List.map (fun (Symbol s, t) -> { vid = 0; name = s; ptype = ptype_of_sort t }) xs in
       let xs',t = strip_foralls t in
       xs @ xs', t
   | _ -> [], t
@@ -111,7 +112,7 @@ let rec expr_of_term (ctx: context) (t: term): Expr.t =
 (** Representation of the contents of a program writen using Horn clauses. *)
 type program = {
   clauses_def: (string * (int * ptype list)) list;
-  clauses: hclause list;
+  clauses: clause list;
   assertions: term list
 }
 
@@ -121,7 +122,7 @@ let get_clause_id (p: program) (c: string) =
     
 
 (** Extract the horn clauses of a smtlib program. *)
-let extract_hclauses (p: command list): program =
+let extract_clauses (p: command list): program =
   List.fold_left (fun p c ->
     match c with
     | DeclareFun (_, Symbol n, ss,_) ->
@@ -140,10 +141,10 @@ let extract_hclauses (p: command list): program =
             with Not_found -> Errors.fatal' pos "Undefined clause name"
           in
           { p with clauses =
-             { id = cid;
+             { cname = { name = c; vid = cid; ptype = TypeBool };
                variables = xs;
                preconds = es;
-               postcond = c, vs }::p.clauses }
+               arguments = vs }::p.clauses }
       | _ -> { p with assertions = t::p.assertions }
       end
     | _ -> p
@@ -151,24 +152,24 @@ let extract_hclauses (p: command list): program =
 
 
 (** Print a horn clause. *)
-let string_of_hclause (c: hclause): string =
+let string_of_clause (c: clause): string =
   let pre = match c.preconds with
     | [] -> ""
     | e::es -> Expr.to_string e ^ List.fold_left (fun s e -> s ^ ", " ^ Expr.to_string e) "" es
   in
-  let vars = match snd c.postcond with
+  let vars = match c.arguments with
     | [] -> ""
     | v::vs -> v.name ^ List.fold_left (fun s v -> s ^ ", " ^ v.name) "" vs
   in
-  fst c.postcond ^ "(" ^ vars ^ ") :- " ^ pre
+  c.cname.name ^ "(" ^ vars ^ ") :- " ^ pre
 
 
 (** Cleanup a clause by removing duplicate variables. *)
-let simplify_hclause (c: hclause): hclause =
+let simplify_clause (c: clause): clause =
   (* The list of variables that can be deleted independently from
      the other clauses. *)
   let removable = List.filter (fun v ->
-    not (List.mem v (snd c.postcond))) c.variables in
+    not (List.mem v c.arguments)) c.variables in
   (* Equivalence classes of variables. *)
   let classes = ref [] in
   let get_class x =
@@ -207,15 +208,15 @@ let simplify_hclause (c: hclause): hclause =
   let pre = List.map (Expr.subs subs) pre in
   (* Apply to the post condition. *)
   let post = List.map (fun v ->
-    try List.assoc v subs with Not_found -> v) (snd c.postcond) in
+    try List.assoc v subs with Not_found -> v) c.arguments in
   (* Remove the now useless variables (the variables that are replaced and that can be removed). *)
   let xsubs = List.map fst subs in
   let removable = List.filter (fun v -> not (List.mem v xsubs)) removable in
   (* Build the resulting clause. *)
-  { id = c.id;
-    variables = snd c.postcond @ removable;
+  { cname = c.cname;
+    variables = c.arguments @ removable;
     preconds = pre;
-    postcond = (fst c.postcond),post }
+    arguments = post }
 
 
 module StringMap = Map.Make (String)
@@ -234,10 +235,10 @@ let build_dependencies (p: program): (string list) StringMap.t =
   List.fold_left (fun g c ->
     let dep = List.concat (List.map depends c.preconds) in
     try
-      let dep' = StringMap.find (fst c.postcond) g in
-      StringMap.add (fst c.postcond) (dep @ dep') g
+      let dep' = StringMap.find c.cname.name g in
+      StringMap.add c.cname.name (dep @ dep') g
     with Not_found ->
-      StringMap.add (fst c.postcond) dep g
+      StringMap.add c.cname.name dep g
   ) StringMap.empty p.clauses
 
 
@@ -266,8 +267,8 @@ let join (u: arguse) (u': arguse): arguse =
 
 (** On a global scale, purge the useless clause arguments: for each
     clause declaration, looks up the unused arguments and remove them. *)
-let simplify_hclauses (p: program): program =
-  (* All arguments. *)
+let simplify_clauses (p: program): program =
+  (* All clause arguments. *)
   let arg_uses = Array.make !id_count (Array.make 0 Never) in
   List.iter (fun (_, (id, arity)) ->
     arg_uses.(id) <- Array.make (List.length arity) Never
@@ -305,9 +306,9 @@ let simplify_hclauses (p: program): program =
 
   List.iter (fun c ->
     let _,args = List.fold_left (fun (i,args) v ->
-      i+1, (v,i)::args) (0, []) (snd c.postcond)
+      i+1, (v,i)::args) (0, []) c.arguments
     in
-    List.iter (extract_uses c.id args []) c.preconds;
+    List.iter (extract_uses c.cname.vid args []) c.preconds;
   ) p.clauses;
 
   (* Propagate. *)
@@ -348,9 +349,9 @@ let simplify_hclauses (p: program): program =
   let cs = List.map (fun c ->
     let pre = List.map filter_args c.preconds in
     let _,post = List.fold_left (fun (i, post) v ->
-      if arg_uses.(c.id).(i) = Always then i+1,v::post else i+1, post
-    ) (0, []) (snd c.postcond) in
-    { c with preconds = pre; postcond = (fst c.postcond),(List.rev post) }
+      if arg_uses.(c.cname.vid).(i) = Always then i+1,v::post else i+1, post
+    ) (0, []) c.arguments in
+    { c with preconds = pre; arguments = List.rev post }
   ) p.clauses in
   { p with clauses = cs }
  

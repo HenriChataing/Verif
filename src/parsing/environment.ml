@@ -39,10 +39,10 @@ let create_var (v: string) (t: ptype): var =
     variable_counters := List.map (fun (v', c') ->
       if v = v' then (v, c+1) else (v',c')
     ) !variable_counters;
-    { name = v ^ "#" ^ string_of_int c; ptype = t }
+    { vid = 0; name = v ^ "#" ^ string_of_int c; ptype = t }
   with Not_found ->
     variable_counters := (v, 1)::!variable_counters;
-    { name = v; ptype = t }
+    { vid = 0; name = v; ptype = t }
   in
   variable_types := (v'.name,t)::!variable_types;
   (match !environment with

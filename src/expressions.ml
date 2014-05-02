@@ -6,6 +6,7 @@ open Types
 
 (** Variables. *)
 type var = {
+  vid: int;               (* Unique identifier. *)
   name: string;           (* The name of the variable. *)
   ptype: ptype            (* The type of declaration. *)
 }
