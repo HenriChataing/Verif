@@ -41,9 +41,9 @@ let main =
   end else if Filename.check_suffix f ".smt2" then begin
     let ast = parse_smt f in
     let p = extract_clauses ast in
-    let cs = List.map simplify_clause p.clauses in
-    let p = simplify_clauses { p with clauses = cs } in
-    List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.clauses;
+    let p = simplify_clauses p in
+    let ast = program_of_clauses p in
+    SmtSyntax.print_program Format.std_formatter ast
   end else begin
     print_string "This file extension is not recognized by the program 'verif'";
     print_newline ()

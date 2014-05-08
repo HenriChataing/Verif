@@ -50,8 +50,8 @@ command:
 | LPAREN DECLARESORT sym=symbol n=NUM RPAREN {
     DeclareSort (lex_join $startpos $endpos, sym,n)
   }
-| LPAREN DEFINESORT sym=symbol LPAREN syms=nonempty_list(symbol) RPAREN expr=expression RPAREN {
-    DefineSort (lex_join $startpos $endpos, sym,syms,expr)
+| LPAREN DEFINESORT sym=symbol LPAREN syms=nonempty_list(symbol) RPAREN sort=sort RPAREN {
+    DefineSort (lex_join $startpos $endpos, sym,syms,sort)
   }
 | LPAREN ASSERT expr=expression RPAREN {
     Assert (lex_join $startpos $endpos, expr)
@@ -72,8 +72,8 @@ command:
 | LPAREN SETINFO a=attribute RPAREN { SetInfo (lex_join $startpos $endpos, a) }
 | LPAREN EXIT RPAREN { Exit (lex_join $startpos $endpos) }
 
-symbol: s=SYMBOL { Symbol s }
-keyword: k=KEYWORD { Keyword k }
+symbol: s=SYMBOL { s }
+keyword: k=KEYWORD { k }
 
 sort_list:
   /*empty*/ { [] }
@@ -94,12 +94,16 @@ bind_list:
   }
 
 identifier:
-  sym=symbol { Simple sym }
-| LPAREN UNDERSCORE sym=symbol ns=nonempty_list(NUM) RPAREN { Indexed (sym,ns) }
+  sym=symbol {
+    { symbol = sym; indexes = []; sort = None }
+  }
+| LPAREN UNDERSCORE sym=symbol ns=nonempty_list(NUM) RPAREN {
+    { symbol = sym; indexes = ns; sort = None }
+  }
 
 qidentifier:
-  LPAREN AS id=identifier s=sort RPAREN { Qualified (id,s) }
-| id=identifier { NonQualified id }
+  LPAREN AS id=identifier s=sort RPAREN { id.sort <- Some s; id }
+| id=identifier { id }
 
 sort:
   id=identifier { Sort (id, []) }

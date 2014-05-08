@@ -8,7 +8,8 @@ open Types
 type var = {
   vid: int;               (* Unique identifier. *)
   name: string;           (* The name of the variable. *)
-  ptype: ptype            (* The type of declaration. *)
+  pos: position;          (* The place of declaration of the variable. *)
+  mutable ptype: ptype    (* The type of declaration. *)
 }
 
 
@@ -20,7 +21,7 @@ module Expr = struct
   | Prim of position * Literal.t
   | Binary of position * string * t * t
   | Unary of position * string * t
-  | Clause of position * string * t list
+  | Clause of position * var * t list
 
   (** Return the free variables of an expression. *)
   let rec freevar (e: t): var list =
@@ -62,9 +63,9 @@ module Expr = struct
         let pe = parens_string_of_expression e in
         op ^ " " ^ pe
     | Clause (_, c, []) ->
-        c ^ "()"
+        c.name ^ "()"
     | Clause (_, c, e::es) ->
-        c ^ "(" ^ to_string e ^ List.fold_left (fun s e -> s ^ ", " ^ to_string e) "" es ^ ")"
+        c.name ^ "(" ^ to_string e ^ List.fold_left (fun s e -> s ^ ", " ^ to_string e) "" es ^ ")"
 
   (** Return the position. *)
   let position (e: t): Positions.position =

@@ -33,16 +33,18 @@ let find_var (p: Positions.position) (v: string): var =
 
 
 (** Create a new variable. *)
-let create_var (v: string) (t: ptype): var =
+let create_var
+    ?(pos: Positions.position = Positions.undefined_position)
+    (v: string) (t: ptype): var =
   let v' = try
     let c = List.assoc v !variable_counters in
     variable_counters := List.map (fun (v', c') ->
       if v = v' then (v, c+1) else (v',c')
     ) !variable_counters;
-    { vid = 0; name = v ^ "#" ^ string_of_int c; ptype = t }
+    { vid = 0; name = v ^ "#" ^ string_of_int c; ptype = t; pos = pos }
   with Not_found ->
     variable_counters := (v, 1)::!variable_counters;
-    { vid = 0; name = v; ptype = t }
+    { vid = 0; name = v; ptype = t; pos = pos }
   in
   variable_types := (v'.name,t)::!variable_types;
   (match !environment with
@@ -119,11 +121,11 @@ let rec typecheck_expr (e: Expr.t) (expected: ptype): Expr.t =
 let rec typecheck_instruction (i: instruction): instruction option =
   match i with
   | Declare (p, x, None) ->
-      let _ = create_var x.name x.ptype in
+      let _ = create_var ~pos:x.pos x.name x.ptype in
       None
   | Declare (p, x, Some e) ->
       let e' = typecheck_expr e x.ptype
-      and x' = create_var x.name x.ptype in
+      and x' = create_var ~pos:x.pos x.name x.ptype in
       Some (Assign (p, x',e'))
   | Assign (p, x, e) ->
       let x' = find_var p x.name in

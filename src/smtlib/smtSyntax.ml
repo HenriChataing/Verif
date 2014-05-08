@@ -3,22 +3,47 @@
 open Positions
 
 (** Symbols. *)
-type symbol = Symbol of string
-type keyword = Keyword of string
+type symbol = string
+type keyword = string
 
-
-(** Identifiers. *)
-type identifier =
-    Simple of symbol
-  | Indexed of symbol * int list
 
 (** Sorts. *)
 type sort = Sort of identifier * sort list
 
-(** Qualified identifiers. *)
-type qidentifier =
-    NonQualified of identifier
-  | Qualified of identifier * sort
+(** Indexed identifiers. *)
+and identifier = {
+  symbol: symbol;
+  indexes: int list;
+  mutable sort: sort option
+}
+
+(** Print a sort. *)
+let rec string_of_sort (Sort (id, ss): sort): string =
+  match ss with
+  | [] -> string_of_identifier id
+  | _ ->
+      "(" ^ string_of_identifier id ^
+      List.fold_left (fun s st -> s ^ " " ^ string_of_sort st) "" ss ^ ")"
+
+(** Print an identifier. *)
+and string_of_identifier (id: identifier): string =
+  let unsorted =
+    match id.indexes with
+    | [] -> id.symbol
+    | ixs ->
+        "(_" ^ List.fold_left (fun s ix -> s ^ " " ^ string_of_int ix) id.symbol ixs ^ ")"
+  in
+  match id.sort with
+  | None -> unsorted
+  | Some s -> "(as " ^ unsorted ^ " " ^ string_of_sort s ^ ")"
+
+(** Create a named identifier. *)
+let make_id (s: string): identifier =
+  { symbol = s;
+    indexes = [];
+    sort = None
+  }
+
 
 (** Type of primitives. *)
 type primitive =
@@ -28,6 +53,14 @@ type primitive =
   | Hex of string
   | Str of string
 
+(** Print a primitive value. *)
+let string_of_primitive (p: primitive): string =
+  match p with
+  | Num n -> string_of_int n
+  | Dec d -> d | Bin b -> b | Hex h -> h
+  | Str s -> "\"" ^ s ^ "\""
+
+
 (** Attributes. *)
 type attribute_value =
     VPrim of primitive
@@ -36,12 +69,25 @@ type attribute_value =
 
 type attribute = keyword * attribute_value option
 
+(** Print an attribuyte. *)
+let string_of_attribute (k,v: attribute): string =
+  let rec string_of_val (v: attribute_value): string =
+    match v with
+    | VPrim p -> string_of_primitive p
+    | VSym s -> s
+    | VApp vs -> "(" ^ List.fold_left (fun s v -> s ^ " " ^ string_of_val v) "" vs ^ " )"
+  in
+  match v with
+  | None -> k
+  | Some v -> k ^ " " ^ string_of_val v
+
+
 (** Type of terms. *)
 type term =
     (* Group all the primitives together. *)
     Prim of position * primitive
     (* Identifiers. *)
-  | Ident of position * qidentifier
+  | Ident of position * identifier
     (* Existential quantifiers. *)
   | Exists of position * (symbol * sort) list * term
     (* Universal qantifiers. *)
@@ -49,10 +95,9 @@ type term =
     (* Let-bindings. *)
   | Let of position * (symbol * term) list * term
     (* Function applications. *)
-  | App of position * qidentifier * term list
+  | App of position * identifier * term list
     (* Expressions with attributes. *)
   | Attribute of position * term * attribute list
-
 
 (** Return the position of a term. *)
 let position_of_term (t: term) =
@@ -62,6 +107,27 @@ let position_of_term (t: term) =
   | Let (p, _, _) | App (p, _, _)
   | Attribute (p, _, _) -> p
 
+(** Print a term. The output respects the syntax of smtlib. *)
+let rec string_of_term (t: term): string =
+  match t with
+  | Prim (_, p) -> string_of_primitive p
+  | Ident (_, qid) -> string_of_identifier qid
+  | Exists (_, vs, t) ->
+    "(exists (" ^ List.fold_left (fun s (v, st) ->
+      s ^ " (" ^ v ^ " " ^ string_of_sort st ^ ")") "" vs ^ " ) " ^ string_of_term t ^ ")"
+  | Forall (_, vs, t) ->
+    "(forall (" ^ List.fold_left (fun s (v, st) ->
+      s ^ " (" ^ v ^ " " ^ string_of_sort st ^ ")") "" vs ^ " ) " ^ string_of_term t ^ ")"
+  | Let (_, vs, t) ->
+    "(let (" ^ List.fold_left (fun s (v, t) ->
+      s ^ " (" ^ v ^ " " ^ string_of_term t ^ ")") "" vs ^ " ) " ^ string_of_term t ^ ")"
+  | App (_, qid, []) ->
+      string_of_identifier qid
+  | App (_, qid, ts) ->
+    "(" ^ string_of_identifier qid ^
+    List.fold_left (fun s t -> s ^ " " ^ string_of_term t) "" ts ^ ")"
+  | Attribute (_,t,_) -> string_of_term t
+
 
 (** Type of standard SMTLib commands. *)
 type command =
@@ -69,7 +135,7 @@ type command =
   | DeclareFun of position * symbol * sort list * sort
   | DefineFun of position * symbol * (symbol * sort) list * sort * term
   | DeclareSort of position * symbol * int
-  | DefineSort of position * symbol * symbol list * term
+  | DefineSort of position * symbol * symbol list * sort
   | Assert of position * term
   | GetAssertions of position
   | CheckSat of position
@@ -85,4 +151,53 @@ type command =
   | SetInfo of position * attribute
   | Exit of position
 
+(** Return the position of a command. *)
+let position_of_command (c: command) =
+  match c with
+  | SetLogic (p,_) | DeclareFun (p,_,_,_) | DefineFun (p,_,_,_,_) 
+  | DeclareSort (p,_,_) | DefineSort (p,_,_,_) | Assert (p,_) 
+  | GetAssertions p | CheckSat p | GetProof p | GetUnsatCore p 
+  | GetValue (p,_) | GetAssignment p | Push (p,_) | Pop (p,_) 
+  | GetOption (p,_) | SetOption (p,_) | GetInfo (p,_) | SetInfo (p,_)
+  | Exit p -> p
+
+(** Print a command. *)
+let string_of_command (c: command): string =
+  match c with
+  | SetLogic (_, s) -> "(set-logic " ^ s ^ ")"
+  | DeclareFun (_, s, sts, st) ->
+      "(declare-fun " ^ s ^ " (" ^ List.fold_left (fun s st -> s ^ " " ^ string_of_sort st) "" sts ^
+      " ) " ^ string_of_sort st ^ ")"
+  | DefineFun (_, s, sts, st, t) ->
+      "(define-fun " ^ s ^ " (" ^
+      List.fold_left (fun s (sym, st) -> s ^ " (" ^ sym ^ " " ^ string_of_sort st ^ ")") "" sts ^
+      " ) " ^ string_of_sort st ^ " " ^ string_of_term t ^ ")"
+  | DeclareSort (_, s, n) -> "(declare-sort " ^ s ^ " " ^ string_of_int n ^ ")"
+  | DefineSort (_, s, ss, st) ->
+      "(define-sort " ^ s ^ " (" ^ List.fold_left (fun s sym -> s ^ " " ^ sym) "" ss ^ " ) " ^
+      string_of_sort st ^ ")"
+  | Assert (_, t) -> "(assert " ^ string_of_term t ^ ")"
+  | GetAssertions _ -> "(get-assertions)"
+  | CheckSat _ -> "(check-sat)"
+  | GetProof _ -> "(get-proof)"
+  | GetUnsatCore _ -> "(get-unsat-core)"
+  | GetValue (_, ts) ->
+      "(get-value (" ^ List.fold_left (fun s t -> s ^ " " ^ string_of_term t) "" ts ^ " ))"
+  | GetAssignment _ -> "(get-assignment)"
+  | Push (_, n) -> "(push " ^ string_of_int n ^ ")"
+  | Pop (_, n) -> "(pop " ^ string_of_int n ^ ")"
+  | GetOption (_, k) -> "(get-option " ^ k ^ ")"
+  | SetOption (_, a) -> "(set-option " ^ string_of_attribute a ^ ")"
+  | GetInfo (_, k) -> "(get-info " ^ k ^ ")"
+  | SetInfo (_, a) -> "(set-info " ^ string_of_attribute a ^ ")"
+  | Exit _ -> "(exit)"
+
+
+(** Print a complete program. *)
+let print_program (fout: Format.formatter) (p: command list): unit =
+  List.iter (fun c ->
+    Format.pp_print_string fout (string_of_command c);
+    Format.pp_print_newline fout ()
+  ) p;
+  Format.pp_print_flush fout ()
 

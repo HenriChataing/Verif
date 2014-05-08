@@ -25,9 +25,10 @@ let operators = [
 
 (** Partial definition of a horn clause. *)
 type clause = {
-  cname: var;             (* The clause's name. *)
-  variables: var list;    (* List of universaly quantified variables. *)
-  preconds: Expr.t list;
+  cname: var;               (* The clause's name. *)
+  cpos: Positions.position; (* The position of the declaration. *)
+  variables: var list;      (* List of universally quantified variables. *)
+  preconds: Expr.t list;    (* Clause preconditions. *)
   arguments: var list
 }
 
@@ -45,41 +46,55 @@ let from_context
 
 
 (** Convert a sort to a primitive type. *)
-let ptype_of_sort (s: sort): ptype =
-  match s with
-  | Sort (Simple (Symbol "Int"), []) -> TypeInt
-  | Sort (Simple (Symbol "Bool"), []) -> TypeBool
-  | _ -> Errors.fatal [] "This sort is not a primitive type"
+let rec ptype_of_sort ?(arg: sort list = []) (s: sort): ptype =
+  let typ =
+    match s with
+    | Sort ({ symbol = "Int" }, []) -> TypeInt
+    | Sort ({ symbol = "Bool" }, []) -> TypeBool
+    | _ -> Errors.fatal [] "This sort is not a primitive type"
+  in
+  let arg = List.map ptype_of_sort arg in
+  if arg = [] then typ
+  else TypeArrow (arg, typ)
+
+(** Convert a primitive type to a sort. *)
+let rec sort_of_ptype (t: ptype): sort =
+  match t with
+  | TypeInt -> Sort (make_id "Int", [])
+  | TypeBool -> Sort (make_id "Bool", [])
+  | TypeFloat -> Sort (make_id "Float", [])
+  | TypeArrow (_, typ) -> sort_of_ptype typ
 
 
 (** Remove the universal quantifications and return the corresponding variables. *)
 let rec strip_foralls (t: term): var list * term =
   match t with
   | Forall (_, xs, t) ->
-      let xs = List.map (fun (Symbol s, t) -> { vid = 0; name = s; ptype = ptype_of_sort t }) xs in
+      let xs = List.map (fun (s, t) ->
+        { vid = 0; name = s; ptype = ptype_of_sort t; pos = Positions.undefined_position }) xs in
       let xs',t = strip_foralls t in
       xs @ xs', t
   | _ -> [], t
 
 
-(** Check whether the term is a conjunction. *)
+(** Use the term in conjunctive form. *)
 let rec as_conjunction (t: term): term list =
   match t with
-  | App (_, NonQualified (Simple (Symbol "and")), ts) ->
+  | App (_, { symbol = "and" }, ts) ->
       List.concat (List.map as_conjunction ts)
   | _ -> [t]
 
 
 (** Match the application aof a clause to its variables. *)
-let as_clause (ctx: context) (t: term): string * var list =
+let as_clause (ctx: context) (t: term): var * var list =
   match t with
-  | App (pos, NonQualified (Simple (Symbol c)), ts) ->
+  | App (pos, { symbol = c }, ts) ->
       let vs = List.map (fun t ->
         match t with
-        | Ident (pos, NonQualified (Simple (Symbol s))) -> from_context ~pos:pos ctx s
+        | Ident (pos, { symbol = s }) -> from_context ~pos:pos ctx s
         | _ -> Errors.fatal' pos "Term is not a Horn clause"
       ) ts in
-      c, vs
+      from_context ~pos:pos ctx c, vs
   | _ -> Errors.fatal' (position_of_term t) "Term is not a Horn clause"
 
 
@@ -87,14 +102,14 @@ let as_clause (ctx: context) (t: term): string * var list =
 let rec expr_of_term (ctx: context) (t: term): Expr.t =
   match t with
   | Prim (pos, Num n) -> Expr.Prim (pos, Literal.Int n)
-  | Ident (pos, NonQualified (Simple (Symbol "true"))) ->
+  | Ident (pos, { symbol = "true" }) ->
       Expr.Prim (pos, Literal.Bool true)
-  | Ident (pos, NonQualified (Simple (Symbol "false"))) ->
+  | Ident (pos, { symbol = "false" }) ->
       Expr.Prim (pos, Literal.Bool false)
 
-  | Ident (pos, NonQualified (Simple (Symbol s))) ->
+  | Ident (pos, { symbol = s }) ->
       Expr.Var (pos, from_context ~pos:pos ctx s)
-  | App (pos, NonQualified (Simple (Symbol op)), ts) ->
+  | App (pos, { symbol = op }, ts) ->
       let es = List.map (expr_of_term ctx) ts in
       begin try
         let (arity, repl) = List.assoc op operators in
@@ -104,51 +119,106 @@ let rec expr_of_term (ctx: context) (t: term): Expr.t =
         | _, 2, [e0;e1] -> Expr.Binary (pos, repl, e0, e1)
         | _ -> Errors.fatal [] "Malformed term"
       with Not_found ->
-        Expr.Clause (pos, op, es)
+        Expr.Clause (pos, from_context ~pos:pos ctx op, es)
       end
   | _ -> Errors.fatal [] "Not implemented"
 
 
+(** Convert an expression to a term. *)
+let rec term_of_expr (e: Expr.t): term =
+  match e with
+  | Expr.Prim (pos, Literal.Int n) -> Prim (pos, Num n)
+  | Expr.Prim (pos, Literal.Bool true) ->
+      Ident (pos, make_id "true")
+  | Expr.Prim (pos, Literal.Bool false) ->
+      Ident (pos, make_id "false")
+  
+  | Expr.Var (pos, v) -> Ident (pos, make_id v.name)
+
+  | Expr.Unary (pos, op, e) ->
+      begin try
+        let op', _ = List.find (fun (_, (_, op')) -> op' = op) operators in
+        App (pos, make_id op',
+          [term_of_expr e])
+      with Not_found ->
+        Errors.fatal' pos ("Undefined operator '" ^ op ^ "'")
+      end
+  | Expr.Binary (pos, op, e0, e1) ->
+      begin try
+        let op', _ = List.find (fun (_, (_, op')) -> op' = op) operators in
+        App (pos, make_id op',
+          [term_of_expr e0; term_of_expr e1])
+      with Not_found ->
+        Errors.fatal' pos ("Undefined operator '" ^ op ^ "'")
+      end
+  | Expr.Clause (pos, c, es) ->
+      App (pos, make_id c.name,
+        List.map term_of_expr es)
+  
+  | _ -> Errors.fatal [] "Not implemented"
+
+
+(** Convert a clause to a term. *)
+let term_of_clause (c: clause): term =
+  let pre = match c.preconds with
+    | [] -> Ident (c.cpos, make_id "true")
+    | e::es ->
+        List.fold_left (fun t e ->
+          let te = term_of_expr e
+          and p = Expr.position e in
+          App (p, make_id "and", [t;te])
+        ) (term_of_expr e) es
+  in
+  let post =
+    App (c.cpos,
+      make_id c.cname.name,
+      List.map (fun v ->
+        Ident (c.cpos, make_id v.name)
+      ) c.arguments
+    ) in
+  let impl = App (c.cpos, make_id "=>", [pre;post]) in
+  if c.variables = [] then
+    impl
+  else
+    Forall (c.cpos,
+      List.map (fun v ->
+        v.name, sort_of_ptype v.ptype) c.variables,
+      impl
+    )
+      
+
 (** Representation of the contents of a program writen using Horn clauses. *)
 type program = {
-  clauses_def: (string * (int * ptype list)) list;
+  context: var list;
   clauses: clause list;
-  assertions: term list
+  script: command list
 }
-
-(** Return the id of a clause. *)
-let get_clause_id (p: program) (c: string) =
-  fst (List.assoc c p.clauses_def)
-    
+ 
 
 (** Extract the horn clauses of a smtlib program. *)
 let extract_clauses (p: command list): program =
   List.fold_left (fun p c ->
     match c with
-    | DeclareFun (_, Symbol n, ss,_) ->
+    | DeclareFun (pos, n, sts,st) ->
         let id = new_id () in
-        { p with
-          clauses_def = (n, (id, List.map ptype_of_sort ss))::p.clauses_def }
+        let c = { name = n; vid = id; ptype = ptype_of_sort ~arg:sts st; pos = pos } in
+        { p with context = c::p.context }
     | Assert (pos, t) ->
       let xs, t = strip_foralls t in
       begin match t with
-      | App (pos, NonQualified (Simple (Symbol "=>")),[pre; post]) ->
-          let es = List.map (expr_of_term xs) (as_conjunction pre)
-          and c, vs = as_clause xs post in
-          let cid =
-            try
-              fst (List.assoc c p.clauses_def)
-            with Not_found -> Errors.fatal' pos "Undefined clause name"
-          in
+      | App (pos, { symbol = "=>" }, [pre; post]) ->
+          let es = List.map (expr_of_term (xs @ p.context)) (as_conjunction pre)
+          and c, vs = as_clause (xs @ p.context) post in
           { p with clauses =
-             { cname = { name = c; vid = cid; ptype = TypeBool };
+             { cname = c;
+               cpos = pos;
                variables = xs;
                preconds = es;
                arguments = vs }::p.clauses }
-      | _ -> { p with assertions = t::p.assertions }
+      | _ -> { p with script = Assert (pos, t)::p.script }
       end
-    | _ -> p
-  ) { clauses_def = []; clauses = []; assertions = [] } p
+    | _ -> { p with script = c::p.script }
+  ) { context = []; clauses = []; script = [] } p
 
 
 (** Print a horn clause. *)
@@ -164,12 +234,8 @@ let string_of_clause (c: clause): string =
   c.cname.name ^ "(" ^ vars ^ ") :- " ^ pre
 
 
-(** Cleanup a clause by removing duplicate variables. *)
-let simplify_clause (c: clause): clause =
-  (* The list of variables that can be deleted independently from
-     the other clauses. *)
-  let removable = List.filter (fun v ->
-    not (List.mem v c.arguments)) c.variables in
+(** Cleanup a clause by substituting variable equalities. *)
+let substitute_equalities (c: clause): clause =
   (* Equivalence classes of variables. *)
   let classes = ref [] in
   let get_class x =
@@ -198,10 +264,7 @@ let simplify_clause (c: clause): clause =
   ) [] c.preconds in
   (* Chose a representant by class, and build the corresponding substitution. *)
   let subs = List.concat (List.map (fun c ->
-    (* If possible, the representant should be a variable that cannot be deleted. *)
-    let repr = try List.find (fun x -> not (List.mem x removable)) c
-      with Not_found -> List.hd c
-    in
+    let repr = List.hd c in
     List.map (fun x -> (x, repr)) c
   ) !classes) in
   (* Apply the substitution to the remaining preconditions. *)
@@ -209,54 +272,18 @@ let simplify_clause (c: clause): clause =
   (* Apply to the post condition. *)
   let post = List.map (fun v ->
     try List.assoc v subs with Not_found -> v) c.arguments in
-  (* Remove the now useless variables (the variables that are replaced and that can be removed). *)
-  let xsubs = List.map fst subs in
-  let removable = List.filter (fun v -> not (List.mem v xsubs)) removable in
   (* Build the resulting clause. *)
-  { cname = c.cname;
-    variables = c.arguments @ removable;
-    preconds = pre;
-    arguments = post }
+  { c with preconds = pre; arguments = post }
 
 
 module StringMap = Map.Make (String)
 
 
-(** Build the dependency graph of the clauses. *)
-let build_dependencies (p: program): (string list) StringMap.t =
-  let rec depends (e: Expr.t): string list =
-    match e with
-    | Expr.Clause (_, c, _) -> [c]
-    | Expr.Binary (_, _, e0, e1) -> depends e0 @ depends e1
-    | Expr.Unary (_, _, e) -> depends e
-    | _ -> []
-  in
-  
-  List.fold_left (fun g c ->
-    let dep = List.concat (List.map depends c.preconds) in
-    try
-      let dep' = StringMap.find c.cname.name g in
-      StringMap.add c.cname.name (dep @ dep') g
-    with Not_found ->
-      StringMap.add c.cname.name dep g
-  ) StringMap.empty p.clauses
-
-
-(** Map used to store the dependencies between variables. *)
-module ArgMap = Map.Make(
-  struct
-    type t = string * int
-    let compare (s0, i0) (s1, i1) =
-      let c = compare s0 s1 in
-      if c == 0 then i0 - i1
-      else c
-  end)
-
 (** Use of an argument. *)
 type arguse =
     Never
   | Always
-  | Depends of (int * int) list
+  | Depends of (int * int) list  (* j-th argument of the i-th clause. *)
 
 let join (u: arguse) (u': arguse): arguse =
   match u,u' with
@@ -267,12 +294,16 @@ let join (u: arguse) (u': arguse): arguse =
 
 (** On a global scale, purge the useless clause arguments: for each
     clause declaration, looks up the unused arguments and remove them. *)
-let simplify_clauses (p: program): program =
+let purge_clause_arguments (p: program): program =
   (* All clause arguments. *)
   let arg_uses = Array.make !id_count (Array.make 0 Never) in
-  List.iter (fun (_, (id, arity)) ->
-    arg_uses.(id) <- Array.make (List.length arity) Never
-  ) p.clauses_def;
+  List.iter (fun v ->
+    let arity = match v.ptype with
+      | TypeArrow (arg, _) -> List.length arg
+      | _ -> 0
+    in
+    arg_uses.(v.vid) <- Array.make arity Never
+  ) p.context;
 
   (* Update an arugment. *)
   let update (c, i: int * int) (u: arguse): unit =
@@ -281,14 +312,14 @@ let simplify_clauses (p: program): program =
 
   (* Extract the uses of variables in an expression. *)
   let rec extract_uses
-      (c: int)  (* The name of the clause. *)
+      (c: int)      (* The id of the clause. *)
       (args: (var * int) list)
       (cs: (int * int) list)  (e: Expr.t): unit =
     match e with
     | Expr.Var (_,v) ->
         let u = if cs = [] then Always else Depends cs in
         List.iter (fun (v', i) ->
-          if v = v' then
+          if v.name = v'.name then
             update (c, i) u
         ) args
     | Expr.Binary (_, _, e0, e1) ->
@@ -296,8 +327,8 @@ let simplify_clauses (p: program): program =
     | Expr.Unary (_,_,e) ->
         extract_uses c args cs e
     | Expr.Clause (_, c', es) ->
-        let i = ref 0 in
-        let id = get_clause_id p c' in
+        let i = ref 0
+        and id = c'.vid in
         List.iter (fun e ->
           extract_uses c args ((id, !i)::cs) e;
           incr i) es
@@ -308,7 +339,12 @@ let simplify_clauses (p: program): program =
     let _,args = List.fold_left (fun (i,args) v ->
       i+1, (v,i)::args) (0, []) c.arguments
     in
-    List.iter (extract_uses c.cname.vid args []) c.preconds;
+    List.iter (fun e ->
+      extract_uses c.cname.vid args [] e) c.preconds
+(*      match e with
+      (* Ignore equalities between variables. *)
+      | Expr.Binary (_, "==", Expr.Var _, Expr.Var _) -> ()
+      | _ -> extract_uses c.cname.vid args [] e) c.preconds; *)
   ) p.clauses;
 
   (* Propagate. *)
@@ -329,13 +365,13 @@ let simplify_clauses (p: program): program =
     done
   done;
 
-  (* Eliminate useless variables. *)
+  (* Remove superflous arguments. *)
   let rec filter_args (e: Expr.t): Expr.t =
     match e with
     | Expr.Binary (pos, op, e0, e1) -> Expr.Binary (pos, op, filter_args e0, filter_args e1)
     | Expr.Unary (pos, op, e) -> Expr.Unary (pos, op, filter_args e)
     | Expr.Clause (pos, c, es) ->
-        let id,_ = List.assoc c p.clauses_def in
+        let id = c.vid in
         let _,es = List.fold_left (fun (i, es) e ->
           if arg_uses.(id).(i) = Always then
             i+1, (filter_args e)::es
@@ -345,6 +381,56 @@ let simplify_clauses (p: program): program =
         Expr.Clause (pos, c, List.rev es)
     | _ -> e
   in
+  (* Same with terms. *)
+  let rec filter_args_in_term (t: term): term =
+    match t with
+    | Prim _ | Ident _ -> t
+    | Exists (pos, xs, t) -> Exists (pos, xs, filter_args_in_term t)
+    | Forall (pos, xs, t) -> Forall (pos, xs, filter_args_in_term t)
+    | Let (pos, bs, t) ->
+        let bs = List.map (fun (x, t) -> x, filter_args_in_term t) bs in
+        Let (pos, bs, filter_args_in_term t)
+    | App (pos, id, ts) ->
+        begin try
+          let c = List.find (fun x -> x.name = id.symbol) p.context in
+          let _,ts = List.fold_left (fun (i, ts) t ->
+            if arg_uses.(c.vid).(i) = Always then
+              i+1, (filter_args_in_term t)::ts
+            else
+              i+1, ts
+          ) (0, []) ts in
+          App (pos, id, List.rev ts)
+        with Not_found ->
+          App (pos, id, List.map filter_args_in_term ts)
+        end
+    | Attribute (pos, t, attrs) -> Attribute (pos, filter_args_in_term t, attrs)
+  in
+
+  (* Update the type of the clauses. *)
+  List.iter (fun c ->
+    let arg, typ = match c.ptype with
+      | TypeArrow (arg, typ) -> arg,typ
+      | _ -> [], c.ptype
+    in
+    let id = c.vid in
+    let _,arg = List.fold_left (fun (i, arg) a ->
+      if arg_uses.(id).(i) = Always then
+        i+1, a::arg
+      else
+        i+1, arg
+    ) (0, []) arg in
+    if arg = [] then
+      c.ptype <- typ
+    else
+      c.ptype <- TypeArrow (List.rev arg, typ)
+  ) p.context;
+
+  (* Update the remaining assertions of the script. *)
+  let script = List.map (fun c ->
+    match c with
+    | Assert (pos, t) -> Assert (pos, filter_args_in_term t)
+    | _ -> c
+  ) p.script in
 
   let cs = List.map (fun c ->
     let pre = List.map filter_args c.preconds in
@@ -353,6 +439,42 @@ let simplify_clauses (p: program): program =
     ) (0, []) c.arguments in
     { c with preconds = pre; arguments = List.rev post }
   ) p.clauses in
-  { p with clauses = cs }
+  { p with clauses = cs; script = script }
  
+
+(** Remove the unused variables existentially declared in a clause. *)
+let purge_clause_variables (c: clause): clause =
+  let used = List.concat (List.map Expr.freevar c.preconds) in
+  let used = used @ c.arguments in
+  let rem = List.filter (fun v -> List.mem v used) c.variables in
+  { c with variables = rem }
+
+
+(** Apply successively the functions substitute_equalities, purge_clause_arguments,
+    purge_clause variables. *)
+let simplify_clauses (p: program): program =
+  let cs = List.map substitute_equalities p.clauses in
+  let p = purge_clause_arguments { p with clauses = cs } in
+  { p with clauses = List.map purge_clause_variables p.clauses }
+
+
+(** Rebuild a simplified smt program. *)
+let program_of_clauses (p: program): command list =
+  let decl = List.map (fun c ->
+    let arg, typ = match c.ptype with
+      | TypeArrow (arg, typ) -> arg, typ
+      | _ -> [], c.ptype
+    in
+    let arg = List.map sort_of_ptype arg
+    and typ = sort_of_ptype typ in
+    DeclareFun (c.pos, c.name, arg, typ)
+  ) p.context in
+  let asserts = List.map (fun c ->
+    Assert (c.cpos, term_of_clause c)
+  ) p.clauses in
+  List.sort (fun c0 c1 ->
+    let p0 = position_of_command c0
+    and p1 = position_of_command c1 in
+    compare (Positions.start_of_position p0) (Positions.start_of_position p1)
+  ) (decl @ asserts @ p.script)
 

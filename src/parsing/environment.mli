@@ -7,7 +7,7 @@ open Types
 val find_var: Positions.position -> string -> Expressions.var
 
 (** Create a new variable. *)
-val create_var: string -> ptype -> Expressions.var
+val create_var: ?pos: Positions.position -> string -> ptype -> Expressions.var
 
 (** Perform some operation in a temporary scope. *)
 val in_scope: (unit -> 'a) -> 'a

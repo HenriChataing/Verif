@@ -71,13 +71,18 @@ instruction:
     If (lex_join $startpos $endpos, e, b1, Some b2)
   }
 | t=ptype id=LID SEMICOLON {
-    Declare (lex_join $startpos $endpos, { vid = 0; name = id; ptype = t }, None)
+    Declare (lex_join $startpos $endpos,
+             { vid = 0; name = id; ptype = t;
+               pos = lex_join $startpos $endpos }, None)
   }
 | t=ptype id=LID EQUALS e=expression SEMICOLON {
-    Declare (lex_join $startpos $endpos, { vid = 0; name = id; ptype = t }, Some e)
+    Declare (lex_join $startpos $endpos,
+             { vid = 0; name = id; ptype = t;
+               pos = lex_join $startpos $endpos }, Some e)
   }
 | id=LID EQUALS e=expression SEMICOLON {
-    Assign (lex_join $startpos $endpos, { vid = 0; name = id; ptype = TypeInt }, e)
+    Assign (lex_join $startpos $endpos,
+            { vid = 0; name = id; ptype = TypeInt; pos = undefined_position }, e)
   }
 | ASSERT LPAREN e=expression RPAREN SEMICOLON {
     Assert (lex_join $startpos $endpos, e)
@@ -106,7 +111,8 @@ atom:
 | d=DEC { Prim (lex_join $startpos $endpos, Float d) }
 | TRUE { Prim (lex_join $startpos $endpos, Bool true) }
 | FALSE { Prim (lex_join $startpos $endpos, Bool false) }
-| id=LID { Var (lex_join $startpos $endpos, { vid = 0; name = id; ptype = TypeInt }) }
+| id=LID { Var (lex_join $startpos $endpos,
+                { vid = 0; name = id; ptype = TypeInt; pos = undefined_position }) }
 | LPAREN e=expression RPAREN { e }
 
 ptype:
