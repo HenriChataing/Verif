@@ -13,6 +13,13 @@ type var = {
 }
 
 
+(** Dummy variable. *)
+let dummy_var: var = {
+  vid = 0; name = "";
+  pos = Positions.undefined_position;
+  ptype = TypeBool
+}
+
 (** Basic expressions. *)
 module Expr = struct
   (** Type of expressions. *)
