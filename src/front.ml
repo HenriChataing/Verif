@@ -43,7 +43,10 @@ let main =
     let p = extract_clauses ast in
     let p = simplify_clauses p in
     let ast = program_of_clauses p in
-    SmtSyntax.print_program Format.std_formatter ast
+    if !Options.pprint_clauses then
+      List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.clauses
+    else
+      SmtSyntax.print_program Format.std_formatter ast
   end else begin
     print_string "This file extension is not recognized by the program 'verif'";
     print_newline ()
