@@ -42,7 +42,7 @@ let main =
     let ast = parse_smt f in
     let p = extract_clauses ast in
     let p = simplify_clauses p in
-    let ast = program_of_clauses p in
+    let ast = commands_of_program p in
     if !Options.pprint_clauses then
       List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.clauses
     else

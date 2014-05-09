@@ -23,7 +23,7 @@ let operators = [
 ]
 
 
-(** Partial definition of a horn clause. *)
+(** Definition of a horn clause. *)
 type clause = {
   cname: var;               (* The clause's name. *)
   cpos: Positions.position; (* The position of the declaration. *)
@@ -97,8 +97,8 @@ let rec as_conjunction (t: term): term list =
   | _ -> [t]
 
 
-(** Match the application aof a clause to its variables. *)
-let as_clause (ctx: context) (t: term): var * term list =
+(** Match the application of a predicate to its variables. *)
+let as_predicate (ctx: context) (t: term): var * term list =
   match t with
   | App (pos, { symbol = c }, ts) ->
       from_context ~pos:pos ctx c, ts
@@ -126,7 +126,7 @@ let rec expr_of_term (ctx: context) (t: term): Expr.t =
         | _, 2, [e0;e1] -> Expr.Binary (pos, repl, e0, e1)
         | _ -> Errors.fatal [] "Malformed term"
       with Not_found ->
-        Expr.Clause (pos, from_context ~pos:pos ctx op, es)
+        Expr.Predicate (pos, from_context ~pos:pos ctx op, es)
       end
   | Attribute (_, t, _) -> expr_of_term ctx t
   | _ -> Errors.fatal [] "Not implemented"
@@ -159,7 +159,7 @@ let rec term_of_expr (e: Expr.t): term =
       with Not_found ->
         Errors.fatal' pos ("Undefined operator '" ^ op ^ "'")
       end
-  | Expr.Clause (pos, c, es) ->
+  | Expr.Predicate (pos, c, es) ->
       App (pos, make_id c.name,
         List.map term_of_expr es)
   
@@ -226,7 +226,7 @@ let extract_clauses (p: command list): program =
       begin match t' with
       | App (pos, { symbol = "=>" }, [pre; post]) ->
           let es = List.map (expr_of_term (xs @ p.context)) (as_conjunction pre)
-          and c, args = as_clause (xs @ p.context) post in
+          and c, args = as_predicate (xs @ p.context) post in
           let args = List.map (expr_of_term (xs @ p.context)) args in
           { p with clauses =
              { cname = c; cpos = pos;
@@ -244,7 +244,7 @@ let extract_clauses (p: command list): program =
         (* Positive and strict clauses. *)
         | [App (_, _, [t])] ->
             let es = List.map (expr_of_term (xs @ p.context)) preconds in
-            let c,args = as_clause (xs @ p.context) t in
+            let c,args = as_predicate (xs @ p.context) t in
             let args = List.map (expr_of_term (xs @ p.context)) args in
             { p with clauses =
               { cname = c; cpos = pos;
@@ -260,7 +260,7 @@ let extract_clauses (p: command list): program =
         | _ -> Errors.fatal' pos "Unaccepted assertion: does not describe a Horn clause"
         end
       | _ ->
-          let c,args = as_clause (xs @ p.context) t' in
+          let c,args = as_predicate (xs @ p.context) t' in
           let args = List.map (expr_of_term (xs @ p.context)) args in
           { p with clauses =
             { cname = c; cpos = pos;
@@ -434,7 +434,7 @@ let purge_clause_arguments (p: program): program =
         extract_uses c args cs e0; extract_uses c args cs e1
     | Expr.Unary (_,_,e) ->
         extract_uses c args cs e
-    | Expr.Clause (_, c', es) ->
+    | Expr.Predicate (_, c', es) ->
         let i = ref 0
         and id = c'.vid in
         List.iter (fun e ->
@@ -486,7 +486,7 @@ let purge_clause_arguments (p: program): program =
     match e with
     | Expr.Binary (pos, op, e0, e1) -> Expr.Binary (pos, op, filter_args e0, filter_args e1)
     | Expr.Unary (pos, op, e) -> Expr.Unary (pos, op, filter_args e)
-    | Expr.Clause (pos, c, es) ->
+    | Expr.Predicate (pos, c, es) ->
         let id = c.vid in
         let _,es = List.fold_left (fun (i, es) e ->
           if arg_uses.(id).(i) = Always then
@@ -494,7 +494,7 @@ let purge_clause_arguments (p: program): program =
           else
             i+1, es
         ) (0, []) es in
-        Expr.Clause (pos, c, List.rev es)
+        Expr.Predicate (pos, c, List.rev es)
     | _ -> e
   in
 
@@ -537,17 +537,17 @@ let purge_clause_variables (c: clause): clause =
 
 (** Apply successively the functions substitute_equalities, purge_clause_arguments,
     purge_clause variables. *)
-let simplify_clauses ?(eqs: bool = true) (p: program): program =
-  let cs = if eqs then List.map (fun c ->
+let simplify_clauses (p: program): program =
+  let cs = List.map (fun c ->
     unify_arguments c;
     substitute_equalities c
-  ) p.clauses else p.clauses in
+  ) p.clauses in
   let p = purge_clause_arguments { p with clauses = cs } in
   { p with clauses = List.map purge_clause_variables p.clauses }
 
 
 (** Rebuild a simplified smt program. *)
-let program_of_clauses (p: program): command list =
+let commands_of_program (p: program): command list =
   let decl = List.map (fun c ->
     let arg, typ = match c.ptype with
       | TypeArrow (arg, typ) -> arg, typ
