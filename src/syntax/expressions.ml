@@ -75,13 +75,32 @@ module Expr = struct
     | Predicate (_, c, e::es) ->
         c.name ^ "(" ^ to_string e ^ List.fold_left (fun s e -> s ^ ", " ^ to_string e) "" es ^ ")"
 
-  (** Convert a term to an expression. *)
 
   (** Return the position. *)
   let position (e: t): Positions.position =
     match e with
     | Var (p,_) | Prim (p,_)
     | Binary (p,_,_,_) | Unary (p,_,_) | Predicate (p,_,_) -> p
+
+
+  (** Boolean negation. The expression is expected to be of type bool. *)
+  let rec enot (e: t): t =
+    match e with
+    (* Boolean constructs. *)
+    | Binary (pos, "||", e0, e1) -> Binary (pos, "&&", enot e0, enot e1)
+    | Binary (pos, "&&", e0, e1) -> Binary (pos, "||", enot e0, enot e1)
+    | Unary (pos, "not", e) -> e
+    | Prim (pos, Primitive.Bool b) -> Prim (pos, Primitive.Bool (not b))
+    (* Comparators. *)
+    | Binary (pos, "==", e0, e1) -> Binary (pos, "<>", e0, e1)
+    | Binary (pos, "<>", e0, e1) -> Binary (pos, "==", e0, e1)
+    | Binary (pos, "<=", e0, e1) -> Binary (pos, ">", e0, e1)
+    | Binary (pos, ">", e0, e1) -> Binary (pos, "<=", e0, e1)
+    | Binary (pos, ">=", e0, e1) -> Binary (pos, "<", e0, e1)
+    | Binary (pos, "<", e0, e1) -> Binary (pos, ">=", e0, e1)
+    (* Errors. *)
+    | _ -> Errors.fatal' (position e) "This expression can not be negated."
+
 end
 
 
@@ -97,7 +116,6 @@ module Bexpr = struct
     Atom of 'a
   | Conj of 'a t list 
   | Disj of 'a t list
-  | Not of 'a t         (* Boolean negation. *)
   | Top                 (* Sat expression. *)
   | Bot                 (* Unsat expression. *)
 
@@ -123,13 +141,12 @@ module Bexpr = struct
     | _ -> Disj [e0;e1] 
 
   (** Neg operator. The negation is pushed to the leaves. *)
-  let rec bnot (e: 'a t): 'a t =
+  let rec bnot (fnot: 'a -> 'a) (e: 'a t): 'a t =
     match e with
     | Top -> Bot | Bot -> Top
-    | Conj bs -> Disj (List.map bnot bs)
-    | Disj bs -> Conj (List.map bnot bs)
-    | Not b -> b
-    | Atom a -> Not (Atom a)
+    | Conj bs -> Disj (List.map (bnot fnot) bs)
+    | Disj bs -> Conj (List.map (bnot fnot) bs)
+    | Atom a -> Atom (fnot a)
 
 
   (** Printing. *)
@@ -158,10 +175,7 @@ module Bexpr = struct
         List.fold_left (fun s b ->
           s ^ " || " ^ pconj b
         ) (pconj b) bs
-    | Not (Conj _ as b) | Not (Disj _ as b) ->
-        "not (" ^ to_string string_of_a b ^ ")"
-    | Not b -> "not " ^ to_string string_of_a b
-        
+
 
   (** Conversion of expressions to boolean expressions.
       Any non boolean expression raises an error. *)

@@ -85,7 +85,7 @@ let rec bexpr_of_expr
   : (Tcons1.t, var * Texpr1.t list) either Bexpr.t =
   match e with
   | Prim (_, Primitive.Bool b) -> if b then Top else Bot
-  | Unary (_, "not", e) -> bnot (bexpr_of_expr env e)
+  | Unary (_, "not", e) -> bexpr_of_expr env (enot e)
   | Binary (_, "&&", e0, e1) -> band (bexpr_of_expr env e0) (bexpr_of_expr env e1)
   | Binary (_, "||", e0, e1) -> bor (bexpr_of_expr env e0) (bexpr_of_expr env e1)
   | Binary (p, op, e0, e1) ->
@@ -114,7 +114,6 @@ let rec predicates_of_bexpr (b: (Tcons1.t, var * Texpr1.t list) either Bexpr.t):
   | Atom (Left _) -> [] | Atom (Right (c,_)) -> [c]
   | Conj bs -> List.concat (List.map predicates_of_bexpr bs)
   | Disj bs -> List.concat (List.map predicates_of_bexpr bs)
-  | Not b -> predicates_of_bexpr b
 
 
 (** Build the graph associated with a program. *)

@@ -20,3 +20,4 @@ test/monniaux
 test/linear-tree-like
 test/general
 test/headdisjoint
+test/error
