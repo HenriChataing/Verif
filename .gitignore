@@ -13,5 +13,10 @@ src/smtlib/smtLexer.ml
 src/smtlib/smtLexer.mli
 src/smtlib/smtParser.ml
 src/smtlib/smtParser.mli
-doc/
-_build/
+doc
+_build
+test/linear
+test/monniaux
+test/linear-tree-like
+test/general
+test/headdisjoint
