@@ -19,16 +19,14 @@
 
 let newline = ('\010' | '\013' | "\013\010")
 let blank = [' ' '\009' '\012']
-let lowalpha = ['a'-'z']
 let alphanum = ['a'-'z' 'A'-'Z' '0'-'9']
-let printchar = ['a'-'z' 'A'-'Z' '0'-'9' '_']
-let infix0 = ['<' '>' '|' '&' '$']
-let infix1 = ['@' '^']
-let infix2 = ['+' '-']
-let infix3 = ['*' '/' '%' '=']
-let symbolchar = (infix0 | infix1 | infix2 | infix3 | ['%' '.' ':'])
+let symbolchar = ['a'-'z' 'A'-'Z' '0'-'9'
+                  '~' '!' '@' '$' '%' '^'
+                  '&' '*' '_' '-' '+' '='
+                  '<' '>' '.' '?' '/']
 
-let lid = (lowalpha | '_') printchar*
+let symbol = (symbolchar+ | '|' [^'|']* '|')
+let keyword = ':' symbolchar+
 
 rule token = parse
 
@@ -36,43 +34,68 @@ rule token = parse
 
   | newline { new_line lexbuf; token lexbuf }
   | blank+  { token lexbuf }
+  | '"'     { string (Buffer.create 13) lexbuf }
+  | ";"     { comment lexbuf }
 
   (** Keywords *)
 
-  | "while" { WHILE }
-  | "if" { IF }
-  | "else" { ELSE }
-  | "int" { INT }
-  | "bool" { BOOL }
-  | "float" { FLOAT }
-  | "break" { BREAK }
-  | "continue" { CONTINUE }
-  | "true" { TRUE }
-  | "false" { FALSE }
+  | "let" { LET }
+  | "forall" { FORALL }
+  | "exists" { EXISTS }
+  | "par" { PAR }
+  | "!" { BANG }
+  | "as" { AS }
+  | "_" { UNDERSCORE }
+  | "NUMERAL" { NUMERAL }
+  | "DECIMAL" { DECIMAL }
+  | "STRING" { STRING }
+
+  | "set-logic" { SETLOGIC }
+  | "declare-fun" { DECLAREFUN }
+  | "define-fun" { DEFINEFUN }
+  | "declare-sort" { DECLARESORT }
+  | "define_sort" { DEFINESORT }
   | "assert" { ASSERT }
+  | "get-assertions" { GETASSERTIONS }
+  | "check-sat" { CHECKSAT }
+  | "get-proof" { GETPROOF }
+  | "get-unsat-core" { GETUNSATCORE }
+  | "get-value" { GETVALUE }
+  | "get-assignment" { GETASSIGNMENT }
+  | "push" { PUSH }
+  | "pop" { POP }
+  | "get-option" { GETOPTION }
+  | "set-option" { SETOPTION }
+  | "get-info" { GETINFO }
+  | "set-info" { SETINFO }
+  | "exit" { EXIT }
 
   (** Punctuation. *)
 
-  | "/*" { OPEN_COMMENT }
-  | "*/" { CLOSE_COMMENT }
   | "(" { LPAREN }
   | ")" { RPAREN }
-  | "{" { LBRACE }
-  | "}" { RBRACE }
-  | ";" { SEMICOLON }
-  | "=" { EQUALS }
-  | "-" { MINUS }
   | eof { EOF }
 
-  (** Identifiers. *)
-  | lid as s { LID s }
-  | ['0'-'9']+ as s { NUM (int_of_string s) }
-  | ['0'-'9']+ '.' ['0'-'9']+ as s { DEC (float_of_string s) }
-  | infix0 symbolchar* as s      { INFIX0 s }
-  | infix1 symbolchar* as s      { INFIX1 s }
-  | infix2 symbolchar* as s      { INFIX2 s }
-  | infix3 symbolchar* as s      { INFIX3 s }
+  (** Literals. *)
+  | ('0' | ['1'-'9']['0'-'9']*)                  as i { NUM (int_of_string i) }
+  | ('0' | ['1'-'9']['0'-'9']*) ['.'] ['0'-'9']+ as d { DEC d }
+  | "#b" ['0' '1']+                              as b { BIN b }
+  | "#x" ['0'-'9' 'A'-'F' 'a'-'f']+              as h { HEX h }
 
-  (** Error. *)
+  (** Identifiers. *)
+
+  | symbol as s { SYMBOL s }
+  | keyword as k { KEYWORD k }
+
   | _  { lexical_error lexbuf "Invalid character." }
+
+and comment = parse
+  | eof { EOF }
+  | newline { new_line lexbuf; token lexbuf }
+  | _ { comment lexbuf }
+
+and string buffer = parse
+  | '"' { STR (Buffer.contents buffer) }
+  | eof { lexical_error lexbuf "Unterminated string." }
+  | _ as c { Buffer.add_char buffer c; string buffer lexbuf }
 

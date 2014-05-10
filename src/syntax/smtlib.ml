@@ -1,4 +1,4 @@
-(** Syntax of SMT-lib v2. *)
+(** Syntax of SmtLib v2. *)
 
 open Positions
 
@@ -25,7 +25,7 @@ let rec string_of_sort (Sort (id, ss): sort): string =
       "(" ^ string_of_identifier id ^
       List.fold_left (fun s st -> s ^ " " ^ string_of_sort st) "" ss ^ ")"
 
-(** Print an identifier. *)
+(** Print an identifier, abiding by the syntax of SmtLib. *)
 and string_of_identifier (id: identifier): string =
   let unsorted =
     match id.indexes with
@@ -37,7 +37,7 @@ and string_of_identifier (id: identifier): string =
   | None -> unsorted
   | Some s -> "(as " ^ unsorted ^ " " ^ string_of_sort s ^ ")"
 
-(** Create a named identifier. *)
+(** Create a named, unindexed and unsorted identifier. *)
 let make_id (s: string): identifier =
   { symbol = s;
     indexes = [];
@@ -69,7 +69,7 @@ type attribute_value =
 
 type attribute = keyword * attribute_value option
 
-(** Print an attribuyte. *)
+(** Print an attribute, abiding by the syntax of SmtLib. *)
 let string_of_attribute (k,v: attribute): string =
   let rec string_of_val (v: attribute_value): string =
     match v with
@@ -82,7 +82,7 @@ let string_of_attribute (k,v: attribute): string =
   | Some v -> k ^ " " ^ string_of_val v
 
 
-(** Type of terms. *)
+(** Definition of terms. *)
 type term =
     (* Group all the primitives together. *)
     Prim of position * primitive
@@ -129,7 +129,7 @@ let rec string_of_term (t: term): string =
   | Attribute (_,t,_) -> string_of_term t
 
 
-(** Type of standard SMTLib commands. *)
+(** Type of standard SmtLib commands. *)
 type command =
     SetLogic of position * symbol
   | DeclareFun of position * symbol * sort list * sort
@@ -161,7 +161,7 @@ let position_of_command (c: command) =
   | GetOption (p,_) | SetOption (p,_) | GetInfo (p,_) | SetInfo (p,_)
   | Exit p -> p
 
-(** Print a command. *)
+(** Print a command, abiding by the syntax of SmtLib. *)
 let string_of_command (c: command): string =
   match c with
   | SetLogic (_, s) -> "(set-logic " ^ s ^ ")"
@@ -193,11 +193,11 @@ let string_of_command (c: command): string =
   | Exit _ -> "(exit)"
 
 
-(** Print a complete program. *)
-let print_program (fout: Format.formatter) (p: command list): unit =
+(** Print a complete script. *)
+let print_script (fout: Format.formatter) (cs: command list): unit =
   List.iter (fun c ->
     Format.pp_print_string fout (string_of_command c);
     Format.pp_print_newline fout ()
-  ) p;
+  ) cs;
   Format.pp_print_flush fout ()
 

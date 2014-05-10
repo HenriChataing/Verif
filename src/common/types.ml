@@ -1,31 +1,43 @@
 (** Primitive types. *)
 
-type ptype =
-    TypeInt
-  | TypeFloat
-  | TypeBool
-  | TypeArrow of ptype list * ptype
-
+type typ =
+    TyInt
+  | TyFloat
+  | TyBool
+  | TyArrow of typ list * typ
 
 (** Printing. *)
-let rec string_of_ptype (t: ptype): string =
+let rec string_of_typ (t: typ): string =
   match t with
-  | TypeInt -> "int" | TypeBool -> "bool"
-  | TypeFloat -> "float"
-  | TypeArrow (arg, typ) ->
+  | TyInt -> "int" | TyBool -> "bool"
+  | TyFloat -> "float"
+  | TyArrow (arg, typ) ->
       let parg = List.map (fun a ->
         match a with
-        | TypeArrow _ -> "(" ^ string_of_ptype a ^ ")"
-        | _ -> string_of_ptype a
+        | TyArrow _ -> "(" ^ string_of_typ a ^ ")"
+        | _ -> string_of_typ a
       ) arg in
-      List.fold_right (fun a s -> a ^ " -> " ^ s) parg (string_of_ptype typ)
+      List.fold_right (fun a s -> a ^ " -> " ^ s) parg (string_of_typ typ)
 
 (** Return [true] iff [t0] is contained in [t1]. *)
-let subtype (t0: ptype) (t1: ptype) =
+let subtype (t0: typ) (t1: typ) =
   match t0, t1 with
-  | TypeInt, TypeInt -> true | TypeInt, TypeFloat -> true
-  | TypeFloat, TypeFloat -> true
-  | TypeBool, TypeBool -> true
+  | TyInt, TyInt -> true | TyInt, TyFloat -> true
+  | TyFloat, TyFloat -> true
+  | TyBool, TyBool -> true
   | _ -> false  (* Subtyping is not implemented for arrow types. *)
 
+(** Return the smallest type containing both proposed types. *)
+let join (t0: typ) (t1: typ) =
+  match t0, t1 with
+  | TyArrow _, _ | _, TyArrow _ -> Errors.fatal [] "Join is not implemented on arrow types."
+  | TyFloat, _ | _, TyFloat -> TyFloat
+  | TyInt, _ | _, TyInt -> TyInt
+  | _ -> TyBool
 
+(** Conversion to Apron types. *)
+let typ_of_typ (t: typ): Apron.Texpr1.typ =
+  match t with
+  | TyInt -> Apron.Texpr1.Int
+  | TyFloat -> Apron.Texpr1.Real
+  | _ -> Errors.fatal [] "This type has no Apron equivalent."

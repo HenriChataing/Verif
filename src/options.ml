@@ -1,10 +1,13 @@
 (** Command line options parsing. *)
 
 let pprint_clauses = ref false
+let dot_file = ref ""
 
 let options = Arg.align [
   ("-v", Arg.Unit (fun _ -> Logger.set_verbose 1), "toggle verbose mode");
   ("-c", Arg.Unit (fun _ -> pprint_clauses := true), "pretty print the horn clauses");
+  ("-d", Arg.String (fun s -> dot_file := s), "write a dot file describing the dependency
+                                                 graph of the predicates");
   ("--verbose", Arg.Int (fun v -> Logger.set_verbose v), "set verbose level")
 ]
 

@@ -1,8 +1,9 @@
-(** Literals include integers, floating point numbers and booleans. *)
+(** Primitives include integers, floating point numbers and booleans. *)
 
 open Types
+open Apron
 
-(** Type of literals. *)
+(** Type of primitives. *)
 type t =
     Int of int
   | Bool of bool
@@ -17,11 +18,11 @@ let to_string (l: t): string =
   | Bool true -> "true"
   | Bool false -> "false"
 
-(** Return the smallest type of a literal. *)
-let typeof (l: t): ptype =
+(** Return the smallest type of a primitive. *)
+let typeof (l: t): typ =
   match l with
-  | Int _ -> TypeInt | Float _ -> TypeFloat
-  | Bool _ -> TypeBool
+  | Int _ -> TyInt | Float _ -> TyFloat
+  | Bool _ -> TyBool
 
 (** Addition. Integers are automatically converted to floating point numbers
     when needed. *)
@@ -31,7 +32,7 @@ let add (l0: t) (l1: t): t =
   | Float f0, Float f1 -> Float (f0 +. f1)
   | Int n0, Float f1 -> Float (float n0 +. f1)
   | Float f0, Int n1 -> Float (f0 +. float n1)
-  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals"
+  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on primitives"
 
 (** Multiplication. Integers are automatically converted to floating point numbers
     when needed. *)
@@ -41,15 +42,15 @@ let mul (l0: t) (l1: t): t =
   | Float f0, Float f1 -> Float (f0 *. f1)
   | Int n0, Float f1 -> Float (float n0 *. f1)
   | Float f0, Int n1 -> Float (f0 *. float n1)
-  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals"
+  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on primitives"
 
 (** Negation. *)
 let neg (l: t): t =
   match l with
   | Int n -> Int (-n) | Float f -> Float (-.f)
-  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals" 
+  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on primitives" 
 
-(** Is the literal nul. *)
+(** Is the primitive nul. *)
 let eq0 (l: t): bool =
   l = Int 0 || l = Float 0.
 
@@ -57,5 +58,13 @@ let eq0 (l: t): bool =
 let lt0 (l: t): bool =
   match l with
   | Int n -> n < 0 | Float f -> f < 0.
-  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on literals"
+  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on primitives"
+
+(** Conversion to Apron coefficients. *)
+let to_coeff (p: t): Coeff.t =
+  match p with
+  | Int n -> Coeff.s_of_int n
+  | Float f -> Coeff.s_of_float f
+  | Bool true -> Coeff.s_of_int 1
+  | Bool false -> Coeff.s_of_int 0
 
