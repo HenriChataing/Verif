@@ -122,7 +122,7 @@ let rec term_of_expr (e: Expr.t): term =
       Ident (pos, make_id "true")
   | Expr.Prim (pos, Primitive.Bool false) ->
       Ident (pos, make_id "false")
-  
+
   | Expr.Var (pos, v) -> Ident (pos, make_id v.name)
 
   | Expr.Unary (pos, op, e) ->
@@ -144,7 +144,7 @@ let rec term_of_expr (e: Expr.t): term =
   | Expr.Predicate (pos, c, es) ->
       App (pos, make_id c.name,
         List.map term_of_expr es)
-  
+
   | _ -> Errors.fatal [] "Not implemented"
 
 
@@ -160,7 +160,7 @@ let term_of_clause (c: clause): term =
         ) (term_of_expr e) es
   in
   let impl =
-    if c.negative then 
+    if c.negative then
       App (c.cpos, make_id "not", [pre])
     else begin
       let post =
@@ -179,7 +179,7 @@ let term_of_clause (c: clause): term =
         v.name, sort_of_typ v.typ) c.variables,
       impl
     )
-      
+
 
 (** Representation of the contents of a program writen using Horn clauses. *)
 type script = {
@@ -187,7 +187,7 @@ type script = {
   clauses: clause list;
   commands: command list  (* The remaining commands, set-logic and check-sat for example. *)
 }
- 
+
 
 (** Extract the horn clauses of a smtlib program. *)
 let extract_clauses (p: command list): script =
@@ -539,7 +539,7 @@ let minimize_clause_arguments (p: script): unit =
     c.preconds <- pre;
     c.arguments <- List.rev post
   ) p.clauses
- 
+
 
 (** Remove the unconstrained variables existentially declared in a clause. *)
 let minimize_clause_variables (c: clause): unit =
@@ -554,15 +554,20 @@ let minimize_clause_variables (c: clause): unit =
   c.variables <- rem
 
 
-(** Apply successively the functions substitute_equalities, purge_clause_arguments,
-    purge_clause variables. *)
+(** Try reducing the number of arguments and variables. *)
 let simplify_clauses (p: script): unit =
+  (* Initial number of arguments. *)
+  let init = List.map (fun c -> Types.nargs c.typ) p.context in
   List.iter (fun c ->
     standardise_arguments c;
     substitute_equalities c
   ) p.clauses;
   minimize_clause_arguments p;
-  List.iter minimize_clause_variables p.clauses
+  List.iter minimize_clause_variables p.clauses;
+  (* Output percentage of deleted arguments. *)
+  let per = List.fold_left2 (fun per n c ->
+    per +. float_of_int (n - Types.nargs c.typ) /. float_of_int n) 0. init p.context in
+  Logger.log ~lvl:1 (string_of_float (100. *. per /. float_of_int (List.length p.context)) ^ "\n")
 
 
 (** Rebuild a simplified smt program. *)

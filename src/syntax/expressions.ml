@@ -19,7 +19,7 @@ module Expr = struct
   (** Return the free variables of an expression. *)
   let rec freevar (e: t): var list =
     match e with
-    | Var (_, x) -> [x] | Prim _ -> [] 
+    | Var (_, x) -> [x] | Prim _ -> []
     | Binary (_, _, e0, e1) -> freevar e0 @ freevar e1
     | Unary (_, _, e) -> freevar e
     | Predicate (_,_, es) -> List.concat (List.map freevar es)
@@ -38,7 +38,7 @@ module Expr = struct
     | Binary (_, _, e0, e1) -> join (typeof e0) (typeof e1)
     | Predicate (_,_,_) -> TyBool
     | _ -> Errors.fatal [] "this expression is not typeable"
-  
+
   (** Rename some of the variables. *)
   let rec rename (sub: (var * var) list) (e: t): t =
     match e with
@@ -114,7 +114,7 @@ module Bexpr = struct
     conversion from expressions to apron linear expressions. *)
   type 'a t =
     Atom of 'a
-  | Conj of 'a t list 
+  | Conj of 'a t list
   | Disj of 'a t list
   | Top                 (* Sat expression. *)
   | Bot                 (* Unsat expression. *)
@@ -138,7 +138,7 @@ module Bexpr = struct
     | Disj bs, Disj bs' -> Disj (bs @ bs')
     | Disj bs, _ -> Disj (e1::bs)
     | _, Disj bs -> Disj (e0::bs)
-    | _ -> Disj [e0;e1] 
+    | _ -> Disj [e0;e1]
 
   (** Neg operator. The negation is pushed to the leaves. *)
   let rec bnot (fnot: 'a -> 'a) (e: 'a t): 'a t =
@@ -153,12 +153,12 @@ module Bexpr = struct
   let rec to_string (string_of_a: 'a -> string) (e: 'a t): string =
     let pdisj e =
       match e with
-      | Disj (_::_) -> "(" ^ to_string string_of_a e ^ ")" 
+      | Disj (_::_) -> "(" ^ to_string string_of_a e ^ ")"
       | _ -> to_string string_of_a e
     in
     let pconj e =
       match e with
-      | Conj (_::_) -> "(" ^ to_string string_of_a e ^ ")" 
+      | Conj (_::_) -> "(" ^ to_string string_of_a e ^ ")"
       | _ -> to_string string_of_a e
     in
 

@@ -41,3 +41,10 @@ let typ_of_typ (t: typ): Apron.Texpr1.typ =
   | TyInt -> Apron.Texpr1.Int
   | TyFloat -> Apron.Texpr1.Real
   | _ -> Errors.fatal [] "This type has no Apron equivalent."
+
+(** Return the number of arguments. *)
+let nargs (t: typ): int =
+  match t with
+  | TyArrow (args, _) -> List.length args
+  | _ -> 0
+
