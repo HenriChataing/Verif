@@ -99,15 +99,18 @@ let rec bexpr_of_expr
       and ne = texpr_of_expr env (Binary (p, "-", e1, e0)) in
       let comps = match op with
         | "==" -> [Tcons1.EQ, e]
-        | "<>" -> [Tcons1.SUP, e; Tcons1.SUP, ne]
+        | "<>" -> [Tcons1.SUP, e; Tcons1.SUP, e]
         | ">=" -> [Tcons1.SUPEQ, e]
         | ">" -> [Tcons1.SUP, e]
         | "<=" -> [Tcons1.SUPEQ, ne]
         | "<" -> [Tcons1.SUP, ne]
         | _ -> Errors.fatal' p ("Unrecognised comparator '" ^ op ^ "'.")
       in
-      let bs = List.map (fun (cmp, te) -> Atom (Left (Tcons1.make e cmp))) comps in
-      Conj bs
+      let bs = List.map (fun (cmp, te) -> Atom (Left (Tcons1.make te cmp))) comps in
+      begin match bs with
+      | [b] -> b
+      | _ -> Conj bs
+      end
   | Predicate (_, c, es) ->
       let arg = List.map (texpr_of_expr env) es in
       Atom (Right (c, Array.of_list arg))
@@ -284,13 +287,23 @@ let rec evaluate_bexpr
   match b with
   | Top -> Abstract1.top man env | Bot -> Abstract1.bottom man env
   | Conj bs ->
-      List.fold_left (fun v b ->
-        Abstract1.meet man v (evaluate_bexpr man env g state b)
-      ) (Abstract1.top man env) bs
+      Logger.log ~lvl:4 "Conj: ";
+      let v = List.fold_left (fun v b ->
+        let v' = evaluate_bexpr man env g state b in
+        Logger.log ~lvl:4 " "; Logger.loga ~lvl:4 v';
+        Abstract1.meet man v v' (* (evaluate_bexpr man env g state b) *)
+      ) (Abstract1.top man env) bs in
+      Logger.log ~lvl:4 " = "; Logger.loga ~lvl:4 v; Logger.newline ~lvl:4 ();
+      v
   | Disj bs ->
-      List.fold_left (fun v b ->
-        Abstract1.join man v (evaluate_bexpr man env g state b)
-      ) (Abstract1.bottom man env) bs
+      Logger.log ~lvl:4 "Disj: ";
+      let v = List.fold_left (fun v b ->
+        let v' = evaluate_bexpr man env g state b in
+        Logger.log ~lvl:4 " "; Logger.loga ~lvl:4 v';
+        Abstract1.join man v v' (*(evaluate_bexpr man env g state b) *)
+      ) (Abstract1.bottom man env) bs in
+      Logger.log ~lvl:4 " = "; Logger.loga ~lvl:4 v; Logger.newline ~lvl:4 ();
+      v
   | Atom (Left c) ->
       let ary = Tcons1.array_make env 1 in
       Tcons1.array_set ary 0 c;
@@ -301,6 +314,8 @@ let rec evaluate_bexpr
       and pargs = g.predicates.(p.vid).parguments in
       let v = Abstract1.change_environment man v (Environment.lce env penv) false in
       let v = Abstract1.substitute_texpr_array man v pargs arg None in
+      Logger.log ~lvl:4 ("Pred [" ^ g.predicates.(p.vid).pname.name ^ "]: ");
+      Logger.loga ~lvl:4 v; Logger.newline ~lvl:4 ();
       Abstract1.change_environment man v env true
 
 
@@ -310,10 +325,14 @@ let evaluate_preconds
     (g: graph)
     (state: 'a abstract_state)
     (c: clause): 'a Abstract1.t =
+  Logger.log ~lvl:4 ("Conj [" ^ c.cname.name ^ "]: "); Logger.newline ~lvl:4 ();
   let env = c.variables in
   let v = List.fold_left (fun v b ->
-    Abstract1.meet man v (evaluate_bexpr man env g state b)
+    let v' = evaluate_bexpr man env g state b in
+    Logger.log ~lvl:4 "  "; Logger.loga ~lvl:4 v'; Logger.newline ~lvl:4 ();
+    Abstract1.meet man v v' (* (evaluate_bexpr man env g state b) *)
   ) (Abstract1.top man env) c.preconds in
+  Logger.log ~lvl:4 " = "; Logger.loga ~lvl:4 v; Logger.newline ~lvl:4 ();
   Abstract1.change_environment man v c.arguments true
 
 
@@ -330,6 +349,7 @@ let print_abstract_state (fmt: Format.formatter) (g: graph) (state: 'a abstract_
 let run_analysis
     (man: 'a Manager.t)
     (g: graph): 'a abstract_state =
+  Logger.log ~lvl:2 "### Run analysis ###"; Logger.newline ~lvl:2 ();
   (* The abstract state. *)
   let state = make_initial_state man g in
   (* The predicates. *)
@@ -344,6 +364,9 @@ let run_analysis
     let d = List.fold_left (fun d p -> Abstract1.join man d p) (Abstract1.bottom man env) pre in
     let d' = if preds.(c).widen then Abstract1.widening man state.(c) d else d in
 
+    Logger.log ~lvl:2 ("Update [" ^ preds.(c).pname.name ^"]: ");
+    Logger.loga ~lvl:2 d'; Logger.newline ~lvl:2 ();
+
     if not (Abstract1.is_eq man state.(c) d') then begin
       state.(c) <- d';
       stable := false
@@ -356,8 +379,10 @@ let run_analysis
     (* Waiting for additional values. *)
     if preds.(c).mark < List.length preds.(c).ancestors then begin
       (* node is widening point => continue (or wait until the end of times). *)
-      if preds.(c).widen then
+      if preds.(c).widen then begin
+        update c;
         List.iter iterate preds.(c).children
+      end
     (* All values are here. *)
     end else if preds.(c).head || preds.(c).mark = List.length preds.(c).ancestors then begin
       (* Compute the value at c. *)
@@ -380,6 +405,12 @@ let run_analysis
       if preds.(i).head then iterate i
     done;
   done;
+
+  for i=0 to (Array.length state)-1 do
+    Logger.log ~lvl:2 (preds.(i).pname.name ^ ": ");
+    Logger.loga ~lvl:2 state.(i); Logger.newline ~lvl:2 ()
+  done;
+
   state
 
 

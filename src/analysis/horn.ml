@@ -556,18 +556,13 @@ let minimize_clause_variables (c: clause): unit =
 
 (** Try reducing the number of arguments and variables. *)
 let simplify_clauses (p: script): unit =
-  (* Initial number of arguments. *)
-  let init = List.map (fun c -> Types.nargs c.typ) p.context in
+  Logger.log ~lvl:2 "### Clause minimalization ###"; Logger.newline ~lvl:2 ();
   List.iter (fun c ->
     standardise_arguments c;
     substitute_equalities c
   ) p.clauses;
   minimize_clause_arguments p;
-  List.iter minimize_clause_variables p.clauses;
-  (* Output percentage of deleted arguments. *)
-  let per = List.fold_left2 (fun per n c ->
-    per +. float_of_int (n - Types.nargs c.typ) /. float_of_int n) 0. init p.context in
-  Logger.log ~lvl:1 (string_of_float (100. *. per /. float_of_int (List.length p.context)) ^ "\n")
+  List.iter minimize_clause_variables p.clauses
 
 
 (** Rebuild a simplified smt program. *)
