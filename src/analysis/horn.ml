@@ -4,6 +4,7 @@ open Smtlib
 open Expressions
 open Vars
 open Types
+open Generics
 
 
 (* List of smtlib operators, each given an arity and the used representation. *)
@@ -17,16 +18,14 @@ let operators = [
 ]
 
 
-(** Definition of a horn clause. *)
-type clause = {
-  cname: var;               (* The clause's name. *)
-  cpos: Positions.position; (* The position of the declaration. *)
-  mutable variables: var list;      (* List of universally quantified variables. *)
-  mutable preconds: Expr.t list;    (* Clause preconditions. *)
-  mutable arguments: Expr.t list;   (* Arguments of the clause. *)
-  negative: bool            (* Whether the goal is negative or positive or strict.
-                               If it is negative, the fields cname and arguments are ignored. *)
-}
+(** Definition of a clauses as returned by the parser. *)
+type clause = (Expr.t list, var list, Expr.t list) gen_clause
+
+type predicate = (var list, Expr.t list, clause) gen_predicate
+
+(** Representation of the contents of a program writen using Horn clauses. *)
+type script = (predicate, clause) gen_script
+
 
 
 (** Convert a sort to a primitive type. *)
@@ -123,7 +122,8 @@ let rec term_of_expr (e: Expr.t): term =
   | Expr.Prim (pos, Primitive.Bool false) ->
       Ident (pos, make_id "false")
 
-  | Expr.Var (pos, v) -> Ident (pos, make_id v.name)
+  | Expr.Var (pos, v) ->
+      Ident (pos, make_id (vname v))
 
   | Expr.Unary (pos, op, e) ->
       begin try
@@ -175,93 +175,122 @@ let term_of_clause (c: clause): term =
     impl
   else
     Forall (c.cpos,
-      List.map (fun v ->
-        v.name, sort_of_typ v.typ) c.variables,
+      List.map (fun v -> vname v, sort_of_typ v.typ) c.variables,
       impl
     )
 
 
-(** Representation of the contents of a program writen using Horn clauses. *)
-type script = {
-  context: var list;      (* The context of clause predicates. *)
-  clauses: clause list;
-  commands: command list  (* The remaining commands, set-logic and check-sat for example. *)
-}
-
-
 (** Extract the horn clauses of a smtlib program. *)
 let extract_clauses (p: command list): script =
-  List.fold_left (fun p c ->
+  (* Extract the predicate declarations and build the context. *)
+  let context, commands, clauses =
+    List.fold_left (fun (context, commands, clauses) com ->
+      match com with
+      (* Declaration of a predicate. *)
+      | DeclareFun (pos, n, sts,st) ->
+          let typ = typ_of_sort ~arg:sts st in
+          let c = fresh_var ~pos:pos ~typ:typ ~name:n "C" in
+          c::context, commands, clauses
+      (* Clauses. *)
+      | Assert _ ->
+          context, commands, com::clauses
+      (* Other. *)
+      | _ ->
+          context, com::commands, clauses
+    ) ([], [], []) p
+  in
+  let pcontext = List.map (fun x -> x.name, x) context in
+  (* Build the predicates. *)
+  let predicates = Array.of_list (List.map (fun n ->
+    { pname = n; arguments' = []; environment = []; clauses = [];
+      mark = 0; head = false; widen = false;
+      children = []; ancestors = []; valid = true }
+  ) (List.rev context)) in
+  let negatives = ref [] in
+  (* To add a dependency. *)
+  let add_dep i j =
+    predicates.(i).children <- Utils.insert j predicates.(i).children;
+    predicates.(j).ancestors <- Utils.insert i predicates.(j).ancestors
+  in
+  (* To add a clause. *)
+  let add_clause c =
+    if not c.negative then begin
+      let deps = List.concat (List.map Expr.predicates c.preconds) in
+      List.iter (fun v -> add_dep v.vid c.cname.vid) deps;
+      predicates.(c.cname.vid).clauses <- c::predicates.(c.cname.vid).clauses
+    end else
+      negatives := c::!negatives
+  in
+  (* Extract and insert the clauses. *)
+  List.iter (fun c ->
     match c with
-    (* Declaration of a predicate. *)
-    | DeclareFun (pos, n, sts,st) ->
-        let typ = typ_of_sort ~arg:sts st in
-        let c = create_var ~pos:pos ~typ:typ n in
-        { p with context = c::p.context }
-    (* Declaration of a clause. *)
     | Assert (pos, t) ->
-      (* Separate the quantifiers. *)
-      let xs, t' = match t with
-        | Forall _ -> strip_foralls t
-        | App (pos, { symbol = "not" }, [t]) ->
-            let xs, t' = strip_exists t in
-            xs, App (pos, make_id "not", [t'])
-        | _ -> [], t
-      in
-      (* Local context. *)
-      let ctx = xs @ p.context in
-      begin match t' with
-      (* Basic form: P0 /\ .. /\ Pn => Q *)
-      | App (pos, { symbol = "=>" }, [pre; post]) ->
-          let es = List.map (expr_of_term ctx) (as_conjunction pre)
-          and c, args = as_predicate ctx post in
-          let args = List.map (expr_of_term ctx) args in
-          { p with clauses =
-             { cname = c; cpos = pos;
-               variables = xs; preconds = es;
-               arguments = args; negative = false }::p.clauses }
-      (* Non explicit forms of horn clauses:
-           not (P0 /\ .. /\ Pn /\ not Q) *)
-      | App (pos, { symbol = "not" }, [conj]) ->
-        let cs = as_conjunction conj in
-        (* Partition the goal and the preconditions. *)
-        let goals, preconds = List.partition (function
-          | App (_, { symbol = "not" }, [App (_, op, _)]) ->
-              List.exists (fun v -> v.name = op.symbol) p.context
-          | _ -> false) cs in
-        begin match goals with
-        (* Exactly one goal => Positive and strict clauses. *)
-        | [App (_, _, [t])] ->
-            let es = List.map (expr_of_term (xs @ p.context)) preconds in
-            let c,args = as_predicate (xs @ p.context) t in
-            let args = List.map (expr_of_term (xs @ p.context)) args in
-            { p with clauses =
-              { cname = c; cpos = pos;
-                variables = xs; preconds = es;
-                arguments = args; negative = false }::p.clauses }
-        (* No goal => Negative clauses. *)
-        | [] ->
-            let es = List.map (expr_of_term (xs @ p.context)) preconds in
-            { p with clauses =
-              { cname = dummy_var; cpos = pos;
-                variables = xs; preconds = es;
-                arguments = []; negative = true }::p.clauses }
-        (* If more than one goal: not a horn clause. *)
-        | _ -> Errors.fatal' pos "Unaccepted assertion: does not describe a Horn clause"
-        end
+        (* Separate the quantifiers. *)
+        let xs, t' = match t with
+          | Forall _ -> strip_foralls t
+          | App (pos, { symbol = "not" }, [t]) ->
+              let xs, t' = strip_exists t in
+              xs, App (pos, make_id "not", [t'])
+          | _ -> [], t
+        in
+        let vs = List.map (fun x -> fresh_var ~pos:x.pos ~typ:x.typ "X") xs in
+        (* Local context. *)
+        let ctx = List.combine (List.map (fun x -> x.name) xs) vs @ pcontext in
+        begin match t' with
+        (* Basic form: P0 /\ .. /\ Pn => Q *)
+        | App (pos, { symbol = "=>" }, [pre; post]) ->
+            let es = List.map (expr_of_term ctx) (as_conjunction pre)
+            and c, args = as_predicate ctx post in
+            let args = List.map (expr_of_term ctx) args in
+            add_clause { cname = c; cpos = pos;
+              variables = vs; preconds = es;
+              arguments = args; negative = false
+            }
+        (* Non explicit form of horn clauses: not (P0 /\ .. /\ Pn /\ not Q) *)
+        | App (pos, { symbol = "not" }, [conj]) ->
+            let cs = as_conjunction conj in
+            (* Partition the goal and the preconditions. *)
+            let goals, preconds = List.partition (function
+              | App (_, { symbol = "not" }, [App (_, op, _)]) ->
+                  List.exists (fun v -> v.name = op.symbol) context
+              | _ -> false) cs in
+            begin match goals with
+            (* Exactly one goal => Positive and strict clauses. *)
+            | [App (_, _, [t])] ->
+                let es = List.map (expr_of_term ctx) preconds in
+                let c,args = as_predicate ctx t in
+                let args = List.map (expr_of_term ctx) args in
+                add_clause { cname = c; cpos = pos;
+                  variables = vs; preconds = es;
+                  arguments = args; negative = false
+                }
+            (* No goal => Negative clauses. *)
+            | [] ->
+                let es = List.map (expr_of_term ctx) preconds in
+                add_clause { cname = dummy_var; cpos = pos;
+                  variables = vs; preconds = es;
+                  arguments = []; negative = true
+                }
+            (* If more than one goal: not a horn clause. *)
+            | _ -> Errors.fatal' pos "Unaccepted assertion: does not describe a Horn clause"
+            end
       (* This case corresponds to clauses with no preconditions. *)
       | _ ->
-          let c,args = as_predicate (xs @ p.context) t' in
-          let args = List.map (expr_of_term (xs @ p.context)) args in
-          { p with clauses =
-            { cname = c; cpos = pos;
-              variables = xs; preconds = [];
-              arguments = args; negative = false }::p.clauses }
+          let c,args = as_predicate ctx t' in
+          let args = List.map (expr_of_term ctx) args in
+          add_clause { cname = c; cpos = pos;
+            variables = vs; preconds = [];
+            arguments = args; negative = false
+          }
       end
 
-    (* Other commands are justed stored unchanged in the script. *)
-    | _ -> { p with commands = c::p.commands }
-  ) { context = []; clauses = []; commands = [] } p
+    (* Other commands have already been removed. *)
+    | _ -> assert false
+  ) clauses;
+  { context = context;
+    predicates = predicates;
+    commands = commands;
+    negatives = !negatives }
 
 
 (** Pretty print a horn clause (to something resembling the syntax of Prolog) *)
@@ -342,55 +371,178 @@ let substitute_equalities (c: clause): unit =
   c.arguments <- post
 
 
+(** Identify a group of points cutting the loops, and mark them as widening points. *)
+let identify_widening_points (g: script): unit =
+  (* Graph exploration. *)
+  let rec walk (hist: int list) (i: int): unit =
+    if g.predicates.(i).mark == 0 then begin
+      g.predicates.(i).mark <- 1;
+      List.iter (walk (i::hist)) g.predicates.(i).children
+    end else if List.mem i hist then
+      g.predicates.(i).widen <- true
+  in
+  (* Launch the exploration on all nodes with no incoming edges. *)
+  for i=0 to (Array.length g.predicates)-1 do
+    if g.predicates.(i).ancestors = [] then begin
+      g.predicates.(i).head <- true;
+      walk [] i
+    end
+  done;
+  (* If it isn't enough, pick up other nodes until all nodes have been visited. *)
+  let finished = ref false in
+  while not !finished do
+    finished := true;
+    for i=0 to (Array.length g.predicates)-1 do
+      if g.predicates.(i).mark == 0 then begin
+        finished := false;
+        g.predicates.(i).head <- true;
+        walk [] i
+      end
+    done
+  done;
+  (* Reinitialize the markers, and update the list of children. *)
+  for i=0 to (Array.length g.predicates)-1 do
+    g.predicates.(i).mark <- 0
+  done
+
+
+(** Produce a DOT file with the dependency graph. *)
+let make_dot (dot: string) (g: script): unit =
+  let fout = open_out dot in
+  let f = Format.formatter_of_out_channel fout in
+  let open Format in
+  pp_print_string f "digraph g {"; pp_print_newline f ();
+  for i=0 to (Array.length g.predicates)-1 do
+    if g.predicates.(i).valid then begin
+      let color =
+        if g.predicates.(i).widen && g.predicates.(i).head then "orange"
+        else if g.predicates.(i).widen then "red"
+        else if g.predicates.(i).head then "green"
+        else "blue" in
+      fprintf f "  %i [color=%s label=\"%s\" shape=box];" i color g.predicates.(i).pname.name;
+      pp_print_newline f ()
+    end
+  done;
+  for i=0 to (Array.length g.predicates)-1 do
+    if g.predicates.(i).valid then
+      List.iter (fun j ->
+        fprintf f "  %i -> %i;" i j;
+        pp_print_newline f ()
+      ) g.predicates.(i).children
+  done;
+  pp_print_string f "}";
+  pp_print_flush f ()
+
+
 (** Rename the arguments of the goal predicate to match the format X{cid}_{vid}. *)
-let standardise_arguments (c: clause): unit =
-  if not c.negative then begin
-    let cname = c.cname in
-    let typargs, typ =
+let standardise_arguments (p: script): unit =
+  for i=0 to (Array.length p.predicates)-1 do
+    let cname = p.predicates.(i).pname in
+    let typargs =
       match cname.typ with
-      | TyArrow (ts, t) -> (ts, t)
-      | _ -> [], cname.typ
+      | TyArrow (ts, t) -> ts
+      | _ -> []
     in
 
     (* Unified arguments. *)
     let _,uargs = List.fold_left (fun (i, uargs) ty ->
       let v = {
-        name = "X" ^ string_of_int cname.vid ^ "_" ^ string_of_int i;
-        pos = cname.pos;
-        typ = ty;
-        vid = i
-      } in
+        name = "A" ^ string_of_int cname.vid;
+        pos = cname.pos; typ = ty; vid = i } in
       i+1, v::uargs
     ) (0, []) typargs in
     let uargs = List.rev uargs in
+    let vargs = List.map (fun v -> Expr.Var (v.pos, v)) uargs in
+
+    p.predicates.(i).arguments' <- uargs;
 
     (* Replace the old by the new. *)
-    let subs, eqs = List.fold_left (fun (subs, eqs) (v, e) ->
+    List.iter (fun c ->
+      let subs, eqs = List.fold_left (fun (subs, eqs) (v, e) ->
+        match e with
+        | Expr.Var (_, v') ->
+            begin try
+              let _ = List.assoc v' subs in
+              subs, Expr.Binary (v.pos, "==", Expr.Var (v.pos, v), e)::eqs
+            with Not_found ->
+              (v', v)::subs, eqs
+            end
+        | _ -> subs, Expr.Binary (v.pos, "==", Expr.Var (v.pos, v), e)::eqs
+      ) ([], []) (List.combine uargs c.arguments) in
+      let preconds = List.map (Expr.rename subs) (c.preconds @ eqs) in
+      let variables = List.filter (fun v ->
+        List.for_all (fun (v', _) -> v <> v') subs
+      ) c.variables @ uargs in
+
+      let diff = List.length variables - List.length c.variables in
+      Logger.log ~mode:"simpl" ("StdArg:" ^ c.cname.name ^": +" ^ string_of_int diff ^ "\n");
+      Logger.flush ();
+
+      c.arguments <- vargs;
+      c.variables <- variables;
+      c.preconds <- preconds
+    ) p.predicates.(i).clauses
+  done
+
+
+(** Inline the clauses that are called called only once. *)
+let inline_clauses (g: script): unit =
+  let preds = g.predicates in
+
+  (* Inline a predicate in a clause. *)
+  let inline (pc: clause) (c: clause) =
+    let pid = pc.cname.vid in
+    (* Duplicate a predicate. *)
+    let duplicate (es: Expr.t list): Expr.t list * var list =
+      let subs = List.combine preds.(pid).arguments' es in
+      let vars = Utils.difference pc.variables preds.(pid).arguments' in
+      let pvars = List.map (fun v -> fresh_var ~pos:v.pos ~typ:v.typ v.name) vars in
+      let rename = List.combine vars pvars in
+      let es = List.map (fun e -> Expr.subs subs (Expr.rename rename e)) pc.preconds in
+      es, pvars
+    in
+    (* Repeat for all predicates in the preconditions. *)
+    let pre, pvars = List.fold_left (fun (pre, pvars) e ->
       match e with
-      | Expr.Var (_, v') ->
-          begin try
-            let _ = List.assoc v' subs in
-            subs, Expr.Binary (v.pos, "==", Expr.Var (v.pos, v), e)::eqs
-          with Not_found ->
-            (v', v)::subs, eqs
-          end
-      | _ -> subs, Expr.Binary (v.pos, "==", Expr.Var (v.pos, v), e)::eqs
-    ) ([], []) (List.combine uargs c.arguments) in
-    let preconds = List.map (Expr.rename subs) (c.preconds @ eqs) in
-    let variables = List.filter (fun v ->
-      List.for_all (fun (v', _) -> v.name != v'.name) subs
-    ) c.variables @ uargs in
+      | Expr.Predicate (_, p', es) when p' = pc.cname ->
+          let es', pvars' = duplicate es in
+          es' @ pre, pvars' @ pvars
+      | _ -> e::pre, pvars
+    ) ([],[]) c.preconds in
+    c.preconds <- pre;
+    c.variables <- pvars @ c.variables;
+    (* Modify graph information. *)
+    if not c.negative then begin
+      if preds.(pid).head then
+        preds.(c.cname.vid).head <- true;
+      preds.(c.cname.vid).ancestors <- Utils.delete pid preds.(c.cname.vid).ancestors;
+      preds.(c.cname.vid).ancestors <- Utils.union preds.(c.cname.vid).ancestors preds.(pid).ancestors;
+      List.iter (fun i ->
+        preds.(i).children <- Utils.insert c.cname.vid (Utils.delete pid preds.(i).children)
+      ) preds.(pid).ancestors
+    end
+  in
 
-    let diff = List.length variables - List.length c.variables in
-    Logger.log ~lvl:2 ("StdArg:" ^ c.cname.name ^": +" ^ string_of_int diff ^ "\n");
-    Logger.flush ();
+  (* Start a graph walk, inlining all possible clauses. *)
+  let rec walk (i: int): unit =
+    if preds.(i).mark = 0 then begin
+      preds.(i).mark <- 1;
+      match preds.(i).children, preds.(i).clauses with
+      | [j], [c] ->
+          Logger.log ~mode:"simpl" ("Inline " ^ preds.(i).pname.name ^ " -> " ^ preds.(j).pname.name); Logger.newline ~mode:"simpl" ();
+          List.iter (inline c) preds.(j).clauses;
+          List.iter (inline c) g.negatives;
 
-    c.arguments <- List.map (fun v -> Expr.Var (v.pos, v)) uargs;
-    c.variables <- variables;
-    c.preconds <- preconds
-  end
+          preds.(i).valid <- false;
+          walk j
+      | cs, _ -> List.iter walk cs
+    end
+  in
 
-module StringMap = Map.Make (String)
+  for i=0 to (Array.length g.predicates)-1 do
+    if g.predicates.(i).head then
+      walk i
+  done
 
 
 (** Use of an argument. *)
@@ -428,46 +580,36 @@ let minimize_clause_arguments (p: script): unit =
   let rec extract_uses
       (c: int)      (* The id of the clause. *)
       (args: (var * int) list)
-      (cs: (int * int) list)  (e: Expr.t): unit =
+      (u: arguse)  (e: Expr.t): unit =
     match e with
     | Expr.Var (_,v) ->
-        let u = if cs = [] then Always else Depends cs in
         List.iter (fun (v', i) ->
-          if v.name = v'.name then
-            update (c, i) u
+          if v = v' then update (c, i) u
         ) args
     | Expr.Binary (_, _, e0, e1) ->
-        extract_uses c args cs e0; extract_uses c args cs e1
+        extract_uses c args u e0; extract_uses c args u e1
     | Expr.Unary (_,_,e) ->
-        extract_uses c args cs e
+        extract_uses c args u e
     | Expr.Predicate (_, c', es) ->
-        let i = ref 0
-        and id = c'.vid in
-        List.iter (fun e ->
-          extract_uses c args ((id, !i)::cs) e;
-          incr i) es
+        Utils.iteri (fun i e ->
+          extract_uses c args (Depends [c'.vid, i]) e) es
     | Expr.Prim _ -> ()
   in
 
-  List.iter (fun c ->
-    (* Negative clauses don't give information about the arguments. *)
-    if not c.negative then begin
-      let _,args = List.fold_left (fun (i,args) a ->
-        match a with
-        | Expr.Var (_, v) -> i+1, (v,i)::args
-        | _ -> update (c.cname.vid,i) Always; i+1, args
-      ) (0, []) c.arguments in
-      (* If two arguments are equal, then they mutually depends on themselves. *)
-      List.iter (fun (v,i) ->
-        List.iter (fun (v',i') ->
-          if v.name = v'.name && i != i' then
-            update (c.cname.vid,i) (Depends [c.cname.vid,i']);
-        ) args
-      ) args;
-      List.iter (fun e ->
-        extract_uses c.cname.vid args [] e) c.preconds
-    end
-  ) p.clauses;
+  for i=0 to (Array.length p.predicates)-1 do
+    List.iter (fun c ->
+      (* Negative clauses don't give information about the arguments. *)
+      if not c.negative then begin
+        let _,args = List.fold_left (fun (i,args) a ->
+          match a with
+          | Expr.Var (_, v) -> i+1, (v,i)::args
+          | _ -> update (c.cname.vid,i) Always; i+1, args
+        ) (0, []) c.arguments in
+        List.iter (fun e ->
+          extract_uses i args Always e) c.preconds
+      end
+    ) p.predicates.(i).clauses;
+  done;
 
   (* Propagate. *)
   let finished = ref false in
@@ -524,21 +666,26 @@ let minimize_clause_arguments (p: script): unit =
   ) p.context;
 
   (* Update the clause definitions. *)
+  for i=0 to (Array.length p.predicates)-1 do
+    if p.predicates.(i).valid then begin
+      List.iter (fun c ->
+        let pre = List.map filter_args c.preconds in
+        let _,post = List.fold_left (fun (i, post) v ->
+          if arg_uses.(c.cname.vid).(i) = Always then i+1,v::post else i+1, post
+        ) (0, []) c.arguments in
+
+        let diff = List.length post - List.length c.arguments in
+        Logger.log ~mode:"simpl" ("MinArg:" ^ c.cname.name ^ ": " ^ string_of_int diff ^ "\n");
+        Logger.flush ();
+
+        c.preconds <- pre;
+        c.arguments <- List.rev post
+      ) p.predicates.(i).clauses
+    end
+  done;
   List.iter (fun c ->
-    let pre = List.map filter_args c.preconds in
-    let _,post = List.fold_left (fun (i, post) v ->
-      if arg_uses.(c.cname.vid).(i) = Always then i+1,v::post else i+1, post
-    ) (0, []) c.arguments in
-
-    if not c.negative then begin
-      let diff = List.length post - List.length c.arguments in
-      Logger.log ~lvl:2 ("MinArg:" ^ c.cname.name ^ ": " ^ string_of_int diff ^ "\n");
-      Logger.flush ();
-    end;
-
-    c.preconds <- pre;
-    c.arguments <- List.rev post
-  ) p.clauses
+    c.preconds <- List.map filter_args c.preconds
+  ) p.negatives
 
 
 (** Remove the unconstrained variables existentially declared in a clause. *)
@@ -556,29 +703,38 @@ let minimize_clause_variables (c: clause): unit =
 
 (** Try reducing the number of arguments and variables. *)
 let simplify_clauses (p: script): unit =
-  Logger.log ~lvl:2 "### Clause minimalization ###"; Logger.newline ~lvl:2 ();
-  List.iter (fun c ->
-    standardise_arguments c;
-    substitute_equalities c
-  ) p.clauses;
+  Logger.log ~mode:"simpl" "### Clause minimalization ###"; Logger.newline ~mode:"simpl" ();
+  standardise_arguments p;
+  inline_clauses p;
+  for i=0 to (Array.length p.predicates)-1 do
+    List.iter (fun c ->
+      substitute_equalities c
+    ) p.predicates.(i).clauses;
+  done;
   minimize_clause_arguments p;
-  List.iter minimize_clause_variables p.clauses
+  for i=0 to (Array.length p.predicates)-1 do
+    List.iter minimize_clause_variables p.predicates.(i).clauses
+  done
 
 
 (** Rebuild a simplified smt program. *)
 let commands_of_script (p: script): command list =
-  let decl = List.map (fun c ->
-    let arg, typ = match c.typ with
-      | TyArrow (arg, typ) -> arg, typ
-      | _ -> [], c.typ
-    in
-    let arg = List.map sort_of_typ arg
-    and typ = sort_of_typ typ in
-    DeclareFun (c.pos, c.name, arg, typ)
-  ) p.context in
+  let decl, clauses = List.fold_left (fun (decls, cs) pred ->
+    if not pred.valid then
+      decls, cs
+    else begin
+      let arg, typ = match pred.pname.typ with
+        | TyArrow (arg, typ) -> arg, typ
+        | _ -> [], pred.pname.typ
+      in
+      let arg = List.map sort_of_typ arg
+      and typ = sort_of_typ typ in
+      let dcl = DeclareFun (pred.pname.pos, pred.pname.name, arg, typ) in
+      dcl::decls, pred.clauses @ cs
+    end) ([], p.negatives) (Array.to_list p.predicates) in
   let asserts = List.map (fun c ->
     Assert (c.cpos, term_of_clause c)
-  ) p.clauses in
+  ) clauses in
   List.sort (fun c0 c1 ->
     let p0 = position_of_command c0
     and p1 = position_of_command c1 in

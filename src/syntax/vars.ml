@@ -3,14 +3,6 @@
 open Types
 open Positions
 
-(* Variable counter, used to generate ids. *)
-let counter = ref 0
-
-(** Reset the variable counter. *)
-let reset (): unit =
-  counter := 0
-
-
 (** Variables. *)
 type var = {
   vid: int;               (* Unique identifier. *)
@@ -26,18 +18,41 @@ let dummy_var: var = {
   typ = TyBool
 }
 
-(** Create a new named variable with a fresh id. *)
-let create_var
+
+(** A variable pool, used to generate freshly named variables. *)
+type pool = { mutable prefixes: (string * int ref) list }
+
+(* Fix the delimitor. *)
+let delimitor = "$"
+
+(* Variable pool, used to generate fresh names. *)
+let pool = { prefixes = [] }
+
+
+(** Create a fresh variable, with the given prefix. Additional
+  information can be added to the variable using optional arguments. *)
+let fresh_var
     ?(pos: position = undefined_position)
     ?(typ: typ = TyBool)
-    (n: string): var =
-  let id = !counter in
-  counter := id+1;
-  { vid = id; name = n; pos = pos; typ = typ } 
+    ?(name: string = "")
+    (p: string): var =
+  let nm = if name = "" then p else name in
+  let id = try
+      let nr = List.assoc p pool.prefixes in
+      incr nr; !nr-1
+    with Not_found -> begin
+      pool.prefixes <- (p, ref 1)::pool.prefixes; 0
+    end in
+  { name = nm; pos = pos; typ = typ; vid = id }
+
+
+(** Name with index appended. *)
+let vname (v: var): string =
+  v.name ^ delimitor ^ string_of_int v.vid
 
 
 (** The context of existing variables. *)
-type context = var list
+type context = (string * var) list
 
 (** Retrieve a variable from the context. *)
 let from_context
@@ -45,6 +60,7 @@ let from_context
     ?(pos: position = undefined_position)
     (n: string): var =
   try
-    List.find (fun x -> x.name = n) ctx
+    List.assoc n ctx
   with Not_found -> Errors.fatal' pos ("Undefined variable " ^ n)
+
 

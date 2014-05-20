@@ -1,9 +1,10 @@
 (** The front-end driver. *)
 
-open Graph
 open Expressions
 open Horn
-
+open Analysis
+open Generics
+open Vars
 
 (** Parse a SmtLib program file. *)
 let parse_smt filename =
@@ -23,18 +24,26 @@ let main =
   if Filename.check_suffix f ".smt2" then begin
     let ast = parse_smt f in
     let p = extract_clauses ast in
+    identify_widening_points p;
     simplify_clauses p;
-    let g = build_graph p in
-    identify_widening_points ~dot:!Options.dot_file g;
+    if !Options.dot_file <> "" then
+      make_dot !Options.dot_file p;
+
+    let g = convert_script p in
     (* Run anaysis and check results. *)
     let man = Polka.manager_alloc_loose () in
     let state = run_analysis man g in
     let ok = check_negatives man g state in
     if ok then print_string "sat" else print_string "unknown"; print_newline ();
+
     (* Output modified program. *)
     let ast = commands_of_script p in
-    if !Options.pprint_clauses then
-      List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.clauses;
+    if !Options.pprint_clauses then begin
+      for i=0 to (Array.length p.predicates)-1 do
+        if p.predicates.(i).valid then List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.predicates.(i).clauses
+      done;
+      List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.negatives
+    end;
     if !Options.smt2_file <> "" then
       let fmt = Format.formatter_of_out_channel (open_out !Options.smt2_file) in
       Smtlib.print_script fmt ast

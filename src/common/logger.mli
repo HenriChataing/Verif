@@ -7,6 +7,9 @@ val set_verbose: int -> unit
 (** Set the formatter. *)
 val set_formatter: Format.formatter -> unit
 
+(** Activate a display mode. *)
+val display: string -> unit
+
 (** Return the used formatter. *)
 val get_formatter: unit -> Format.formatter
 
@@ -14,11 +17,11 @@ val get_formatter: unit -> Format.formatter
 val flush: unit -> unit
 
 (** Logging function. *)
-val log: ?lvl: int -> string -> unit
+val log: ?mode: string -> ?lvl: int -> string -> unit
 
 (** Logging function, specialized in printing abstract values. *)
-val loga: ?lvl: int ->'a Apron.Abstract1.t -> unit
+val loga: ?mode: string -> ?lvl: int ->'a Apron.Abstract1.t -> unit
 
 (** Write a line break. *)
-val newline: ?lvl: int -> unit -> unit
+val newline: ?mode: string -> ?lvl: int -> unit -> unit
 

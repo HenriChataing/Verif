@@ -53,6 +53,18 @@ module Expr = struct
     | Unary (pos, op, e) -> Unary (pos, op, rename sub e)
     | Predicate (pos, op, es) -> Predicate (pos, op, List.map (rename sub) es)
 
+  (** Substitute variables by expression. *)
+  let rec subs (sub: (var * t) list) (e: t): t =
+    match e with
+    | Var (pos, x) ->
+        begin try List.assoc x sub
+        with Not_found -> e
+        end
+    | Binary (pos, op, e0, e1) -> Binary (pos, op, subs sub e0, subs sub e1)
+    | Unary (pos, op, e) -> Unary (pos, op, subs sub e)
+    | Predicate (pos, p, es) -> Predicate (pos, p, List.map (subs sub) es)
+    | _ -> e
+
   (** Printing. *)
   let rec to_string (e: t): string =
     let parens_string_of_expression e =
@@ -61,7 +73,7 @@ module Expr = struct
       | _ -> to_string e
     in
     match e with
-    | Var (_,x) -> x.name
+    | Var (_,x) -> x.name ^ delimitor ^ string_of_int x.vid
     | Prim (_,l) -> Primitive.to_string l
     | Binary (_,op,e0,e1) ->
         let pe0 = parens_string_of_expression e0
@@ -101,6 +113,13 @@ module Expr = struct
     (* Errors. *)
     | _ -> Errors.fatal' (position e) "This expression can not be negated."
 
+  (** Return the list of predicates. *)
+  let rec predicates (e: t): var list =
+    match e with
+    | Binary (_,_,e0,e1) -> predicates e0 @ predicates e1
+    | Unary (_,_,e) -> predicates e
+    | Predicate (_,p, _) -> [p] (* No recursion. *)
+    | _ -> []
 end
 
 

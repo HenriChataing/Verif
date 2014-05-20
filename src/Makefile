@@ -6,7 +6,7 @@ MODULES = \
 	common/primitive common/types common/errors \
 	syntax/vars syntax/smtlib syntax/expressions \
 	parsing/tokens parsing/parser parsing/lexer \
-	analysis/graph analysis/horn \
+	analysis/generics analysis/horn analysis/analysis \
 	options front
 
 MAIN = front

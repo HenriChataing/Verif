@@ -30,3 +30,23 @@ let rec insert (i: int) (is: int list): int list =
   | j::is when i=j -> j::is
   | j::is -> j::(insert i is)
 
+let rec delete (i: int) (is: int list): int list =
+  match is with
+  | [] -> []
+  | i'::is ->
+      if i' = i then is
+      else if i' < i then i'::(delete i is)
+      else i'::is
+
+let rec union (xs: int list) (ys: int list): int list =
+  match xs, ys with
+  | [], _ -> ys
+  | _, [] -> xs
+  | x::xs, y::ys ->
+      if x = y then x::(union xs ys)
+      else if x < y then x::(union xs (y::ys))
+      else y::(union (x::xs) ys)
+
+let difference (xs: 'a list) (ys: 'a list): 'a list =
+  List.filter (fun x -> not (List.mem x ys)) xs
+

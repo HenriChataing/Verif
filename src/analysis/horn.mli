@@ -5,18 +5,11 @@ open Vars
 open Expressions
 open Types
 
-(** Definition of a horn clause. *)
-type clause = {
-  cname: var;               (* The clause's name. *)
-  cpos: Positions.position; (* The position of the declaration. *)
-  mutable variables: var list;      (* List of universally quantified variables. *)
-  mutable preconds: Expr.t list;    (* Clause preconditions. *)
-  mutable arguments: Expr.t list;   (* Arguments of the clause. *)
-  negative: bool            (* Whether the goal is negative or positive or strict.
-                               If it is negative, the fields cname and arguments are ignored. *)
-}
 
-
+(* Definition of clauses as returned by the parser. *)
+type clause = (Expr.t list, var list, Expr.t list) Generics.gen_clause
+type predicate = (var list, Expr.t list, clause) Generics.gen_predicate
+type script = (predicate, clause) Generics.gen_script
 
 (** Convert a sort to a primitive type. *)
 val typ_of_sort: ?arg: sort list -> sort -> typ
@@ -47,15 +40,15 @@ val term_of_expr: Expr.t -> term
 val term_of_clause: clause -> term
 
 
-(** Representation of the contents of a program writen using Horn clauses. *)
-type script = {
-  context: var list;
-  clauses: clause list;
-  commands: command list
-}
- 
+
 (** Extract the horn clauses of a smtlib program. *)
 val extract_clauses: command list -> script
+
+(** Identify a subset of predicates cutting all loops. *)
+val identify_widening_points: script -> unit
+
+(** Produce a DOT file with the dependency graph of the predicates. *)
+val make_dot: string -> script -> unit
 
 (** Print a horn clause. *)
 val string_of_clause: clause -> string
