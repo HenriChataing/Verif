@@ -47,3 +47,24 @@ type ('p, 'c) gen_script = {
   commands: command list       (* Remaining commands. *)
 }
 
+
+(** The iteration function of the static analysis. *)
+let rec iterate (predicates: 'p array) (update: int -> unit) (c: int): unit =
+  predicates.(c).mark <- predicates.(c).mark + 1;
+  (* Waiting for additional values. *)
+  if predicates.(c).mark < List.length predicates.(c).ancestors then begin
+    (* node is widening point => continue. *)
+    if predicates.(c).widen then begin
+      update c;
+      List.iter (iterate predicates update) predicates.(c).children
+    end
+  (* All values are here. *)
+  end else if predicates.(c).head || predicates.(c).mark = List.length predicates.(c).ancestors then begin
+    (* Compute the value at c. *)
+    update c;
+    (* Continue only if the point is not a widening point. *)
+    if not predicates.(c).widen then
+      List.iter (iterate predicates update) predicates.(c).children
+  (* Already went through here, stop. *)
+  end else ()
+

@@ -24,26 +24,44 @@ let main =
   if Filename.check_suffix f ".smt2" then begin
     let ast = parse_smt f in
     let p = extract_clauses ast in
+
     identify_widening_points p;
     simplify_clauses p;
+
+    (* Output DOT file. *)
     if !Options.dot_file <> "" then
       make_dot !Options.dot_file p;
 
-    let g = convert_script p in
-    (* Run anaysis and check results. *)
-    let man = Polka.manager_alloc_loose () in
-    let state = run_analysis man g in
-    let ok = check_negatives man g state in
-    if ok then print_string "sat" else print_string "unknown"; print_newline ();
+    (* Run the analysis. *)
+    if !Options.run_analysis then begin
+      let g = convert_script p in
+      (* Run anaysis and check results. *)
+      let ok =
+        match !Options.value_domain with
+        | "polka" ->
+          let man = Polka.manager_alloc_loose () in
+          let state = run_analysis man g in
+          check_negatives man g state
+        | "box" ->
+          let man = Box.manager_alloc () in
+          let state = run_analysis man g in
+          check_negatives man g state
+        | _ -> assert false
+      in
+      if ok then print_string "sat" else print_string "unknown"; print_newline ();
+    end;
 
-    (* Output modified program. *)
     let ast = commands_of_script p in
+
+    (* Pretty print the clauses. *)
     if !Options.pprint_clauses then begin
       for i=0 to (Array.length p.predicates)-1 do
         if p.predicates.(i).valid then List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.predicates.(i).clauses
       done;
       List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.negatives
     end;
+
+    (* Output modified program. *)
     if !Options.smt2_file <> "" then
       let fmt = Format.formatter_of_out_channel (open_out !Options.smt2_file) in
       Smtlib.print_script fmt ast

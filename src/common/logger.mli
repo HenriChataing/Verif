@@ -16,6 +16,9 @@ val get_formatter: unit -> Format.formatter
 (** Flush the formatter. *)
 val flush: unit -> unit
 
+(** Selective execution of a chunk of code. *)
+val execute: ?mode: string -> ?lvl: int -> (unit -> unit) -> unit
+
 (** Logging function. *)
 val log: ?mode: string -> ?lvl: int -> string -> unit
 

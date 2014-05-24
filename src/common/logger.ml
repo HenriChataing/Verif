@@ -31,6 +31,14 @@ let get_formatter (): Format.formatter =
 let flush (): unit =
   Format.pp_print_flush !formatter ()
 
+(** Selective execution of a chunk of code. *)
+let execute ?(mode: string = "") ?(lvl: int = 0) (f: unit -> unit): unit =
+  if mode <> "" then begin
+    if List.mem mode !displayed then
+      f ()
+  end else if lvl < !verbose then
+    f ()
+
 (** Logging function. The mode, if any, has priority over the level. *)
 let log ?(mode: string = "") ?(lvl: int = 0) (msg: string): unit =
   if mode <> "" then begin

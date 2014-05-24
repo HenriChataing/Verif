@@ -9,6 +9,12 @@ val dot_file: string ref
 (** Selection of the smt2 output. *)
 val smt2_file: string ref
 
+(** Do abstract interpretation. *)
+val run_analysis: bool ref
+
+(** The value domain of the analysis. *)
+val value_domain: string ref
+
 (** The filename that has been provided on the command line. *)
 val filename: string
 

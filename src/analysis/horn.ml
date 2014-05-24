@@ -6,6 +6,10 @@ open Vars
 open Types
 open Generics
 
+module IntMap = Map.Make (struct
+    type t = int
+    let compare = (-)
+  end)
 
 (* List of smtlib operators, each given an arity and the used representation. *)
 let operators = [
@@ -76,7 +80,6 @@ let rec as_conjunction (t: term): term list =
   | App (_, { symbol = "and" }, ts) ->
       List.concat (List.map as_conjunction ts)
   | _ -> [t]
-
 
 (** Match the application of a predicate to its variables. *)
 let as_predicate (ctx: context) (t: term): var * term list =
@@ -515,6 +518,7 @@ let inline_clauses (g: script): unit =
     if not c.negative then begin
       if preds.(pid).head then
         preds.(c.cname.vid).head <- true;
+      preds.(pid).head <- false;  (* Ignore this predicate during analysis. *)
       preds.(c.cname.vid).ancestors <- Utils.delete pid preds.(c.cname.vid).ancestors;
       preds.(c.cname.vid).ancestors <- Utils.union preds.(c.cname.vid).ancestors preds.(pid).ancestors;
       List.iter (fun i ->
@@ -558,134 +562,264 @@ let join (u: arguse) (u': arguse): arguse =
   | Depends u, Depends u' -> Depends (u @ u')
 
 
-(** On a global scale, purge the useless clause arguments: for each
-    clause declaration, looks up the unused (=unconstrained) arguments and remove them. *)
+(** On a global scale, purge the useless clause arguments.
+    This is done by using abstract interpretation with a relational domain
+    that keeps for each variable the contrained state (=the dimension of the abstract value)
+    and the equalities between variables. *)
 let minimize_clause_arguments (p: script): unit =
-  (* All clause arguments. *)
-  let arg_uses = Array.make (List.length p.context) (Array.make 0 Never) in
-  List.iter (fun v ->
-    let arity = match v.typ with
-      | TyArrow (arg, _) -> List.length arg
-      | _ -> 0
-    in
-    arg_uses.(v.vid) <- Array.make arity Never
-  ) p.context;
 
-  (* Update an arugment. *)
-  let update (c, i: int * int) (u: arguse): unit =
-    arg_uses.(c).(i) <- join u arg_uses.(c).(i)
+  (* Make fresh union variables for the arguments of a predicate. *)
+  let make_uvars (xs: var list) =
+    Array.of_list (List.map (fun x -> make_uvar x Never) xs)
   in
 
-  (* Extract the uses of variables in an expression. *)
-  let rec extract_uses
-      (c: int)      (* The id of the clause. *)
-      (args: (var * int) list)
-      (u: arguse)  (e: Expr.t): unit =
+  (* The abstract state. *)
+  let state = Array.map (fun p -> if p.valid then make_uvars p.arguments' else [||]) p.predicates in
+
+  (* Update the usage of an argument in a local state. *)
+  let update x u lstate =
+    Vars.update lstate.(x.vid) (join u) in
+
+  (* Reset a local state. *)
+  let reset lstate =
+    for i=0 to (Array.length lstate)-1 do
+      lstate.(i).parent <- Utils.Left Never
+    done in
+
+  (* Merge two equivalence classes == insert an equality. *)
+  let equals x y lstate =
+    Vars.union ~join:join lstate.(x.vid) lstate.(y.vid) in
+
+  (* Retrieve the usage of an argument. *)
+  let usage c i =
+    Vars.value state.(c.vid).(i) in
+
+  (* Check whether two arguments are in the same class. *)
+  let same c i j =
+    Vars.find state.(c.vid).(i) == Vars.find state.(c.vid).(j) in
+
+  (* Evaluate an expression. *)
+  let rec evaluate lstate e =
     match e with
-    | Expr.Var (_,v) ->
-        List.iter (fun (v', i) ->
-          if v = v' then update (c, i) u
-        ) args
-    | Expr.Binary (_, _, e0, e1) ->
-        extract_uses c args u e0; extract_uses c args u e1
-    | Expr.Unary (_,_,e) ->
-        extract_uses c args u e
-    | Expr.Predicate (_, c', es) ->
+    | Expr.Var (_, v) when isarg v -> update v Always lstate
+    | Expr.Predicate (_, c, es) ->
+        (* Join with the equivalence of predicate c. *)
         Utils.iteri (fun i e ->
-          extract_uses c args (Depends [c'.vid, i]) e) es
-    | Expr.Prim _ -> ()
-  in
+          if usage c i = Always then evaluate lstate e;
+          match e with
+          | Expr.Var (_, v) when isarg v ->
+              Utils.iteri (fun j e' ->
+                if j > i then begin
+                  match e' with
+                  | Expr.Var (_, v') when isarg v' && same c i j ->
+                      equals v v' lstate
+                  | _ -> ()
+                end
+              ) es
+          | _ -> ()
+        ) es
+    | Expr.Binary (_, _, e0, e1) -> evaluate lstate e0; evaluate lstate e1
+    | Expr.Unary (_, _, e) -> evaluate lstate e
+    | _ -> () in
 
-  for i=0 to (Array.length p.predicates)-1 do
-    List.iter (fun c ->
-      (* Negative clauses don't give information about the arguments. *)
-      if not c.negative then begin
-        let _,args = List.fold_left (fun (i,args) a ->
-          match a with
-          | Expr.Var (_, v) -> i+1, (v,i)::args
-          | _ -> update (c.cname.vid,i) Always; i+1, args
-        ) (0, []) c.arguments in
-        List.iter (fun e ->
-          extract_uses i args Always e) c.preconds
-      end
-    ) p.predicates.(i).clauses;
-  done;
+  (* Evaluate a list of preconditions. *)
+  let evaluate_preconds lstate es =
+    List.iter (fun e ->
+      match e with
+      | Expr.Binary (_, "==", Expr.Var (_,v0), Expr.Var (_,v1)) ->
+          equals v0 v1 lstate
+      | _ -> evaluate lstate e
+    ) es in
 
-  (* Propagate. *)
-  let finished = ref false in
-  while not !finished do
-    finished := true;
-    for c=0 to (Array.length arg_uses)-1 do
-      for i=0 to (Array.length arg_uses.(c))-1 do
-        match arg_uses.(c).(i) with
-        | Depends args ->
-            let always = List.exists (fun (c',i') -> arg_uses.(c').(i') = Always) args in
-            if always then begin
-              finished := false;
-              arg_uses.(c).(i) <- Always
-            end
-        | _ -> ()
+  (* Display a partition. *)
+  let print_lstate lstate =
+    Logger.execute ~mode:"simpl-debug" (fun _ ->
+      (* Build the equivalence classes. *)
+      let equivs = ref IntMap.empty in
+      for j=0 to (Array.length lstate)-1 do
+        let c = (Vars.find lstate.(j)).var.vid in
+        let cur = try IntMap.find c !equivs with Not_found -> [] in
+        equivs := IntMap.add c (lstate.(j).var::cur) !equivs
+      done;
+
+      IntMap.iter (fun c vs ->
+        Logger.log "[ "; List.iter (fun uv -> Logger.log (vname uv ^ " ")) vs;
+        if Vars.value lstate.(c) = Always then Logger.log "] = [ Always ]\n"
+        else Logger.log "] = [ Never ]\n"
+      ) !equivs
+    ) in
+
+  (* Join the partitions of two local states (as coming from different clauses). *)
+  let join_lstates lstate0 lstate1 dest =
+    let size = Array.length lstate0 in
+    if size < 2 then ()
+    else begin
+      (* Reset the destination. *)
+      for i=0 to size-1 do
+        dest.(i).parent <- Utils.Left (join (Vars.value lstate0.(i)) (Vars.value lstate1.(i)))
+      done;
+
+      (* Derive the equivalence classes. *)
+      for i=0 to size-2 do
+        for j=i+1 to size-1 do
+          (* i and j are in the same class iff they are in both states. *)
+          if Vars.find lstate0.(i) == Vars.find lstate0.(j) &&
+             Vars.find lstate1.(i) == Vars.find lstate1.(j) then
+            Vars.union dest.(i) dest.(j)
+        done
       done
-    done
-  done;
+    end in
 
-  (* Remove superflous arguments. *)
-  let rec filter_args (e: Expr.t): Expr.t =
-    match e with
-    | Expr.Binary (pos, op, e0, e1) -> Expr.Binary (pos, op, filter_args e0, filter_args e1)
-    | Expr.Unary (pos, op, e) -> Expr.Unary (pos, op, filter_args e)
-    | Expr.Predicate (pos, c, es) ->
-        let id = c.vid in
-        let _,es = List.fold_left (fun (i, es) e ->
-          if arg_uses.(id).(i) = Always then
-            i+1, (filter_args e)::es
-          else
-            i+1, es
-        ) (0, []) es in
-        Expr.Predicate (pos, c, List.rev es)
-    | _ -> e
+  (* Update the value of a single predicate. *)
+  let update_predicate (c: int): unit =
+    (* Make usable local states. *)
+    let lstate0 = ref (make_uvars p.predicates.(c).arguments') in
+    match p.predicates.(c).clauses with
+    | [] -> ()
+    | [cl] -> begin
+        evaluate_preconds !lstate0 cl.preconds;
+        state.(c) <- !lstate0
+      end
+    | cl::cls -> begin
+        (* Make more local states. Can't use state.(c) because of self recursing
+           predicates. *)
+        let lstate1 = ref (make_uvars p.predicates.(c).arguments')
+        and lstate2 = ref (make_uvars p.predicates.(c).arguments') in
+        (* Evaluate each clause, and join the values.
+           For each iteration :
+            - lstate0 serves to compute the value of the clause
+            - lstate1 contains the join value
+            - lstate2 servers to compute the join value. *)
+        evaluate_preconds !lstate1 cl.preconds;
+        List.iter (fun cl ->
+          reset !lstate0;
+          evaluate_preconds !lstate0 cl.preconds;
+          join_lstates !lstate0 !lstate1 !lstate2;  (* lstate2 is reset by the function call. *)
+          let tmp = !lstate2 in
+          lstate2 := !lstate1;
+          lstate1 := tmp
+        ) cls;
+        (* At this point, lstate1 contains the final value. *)
+        state.(c) <- !lstate1
+      end
   in
 
-  (* Update the type of the clauses. *)
+  (* Run the analysis. *)
+  for i=0 to (Array.length p.predicates)-1 do
+    p.predicates.(i).mark <- if p.predicates.(i).head then -1 else 0;
+  done;
+  for i=0 to (Array.length p.predicates)-1 do
+    if p.predicates.(i).head then Generics.iterate p.predicates update_predicate i
+  done;
+
+  (* Display the results. *)
+  Logger.execute ~mode:"simpl-debug" (fun _ ->
+    for i=0 to (Array.length p.predicates)-1 do
+      if p.predicates.(i).valid then begin
+        Logger.log ("Predicate " ^ vname p.predicates.(i).pname ^ ":\n");
+        print_lstate state.(i)
+      end
+    done;
+    Logger.flush ()
+  );
+
+  (* At this point, all the abstract values, which correspond to equivalence
+    classes of the predicate arguments, have been computed. To determine which
+    variable should be kept :
+     - if the class representant is unused, remove the variable
+     - else if equal to the representant, keep the variable
+     - else remove
+    Of course, equalities are generated where predicates are used to
+    make up for the missing arguments. *)
+
+  let keep (c: int) (i: int): bool =
+    if Vars.value state.(c).(i) = Never then false
+    else Vars.find state.(c).(i) == state.(c).(i) in
+
+  (* Apply the modifications to an expression. *)
+  let rec modify (c: int) (e: Expr.t): Expr.t * Expr.t list =
+    match e with
+    | Expr.Var (pos,v) when isarg v ->
+        let v' = Vars.find state.(c).(v.vid) in
+        Expr.Var (pos,v'.var), []
+    | Expr.Binary (pos, op, e0, e1) ->
+        let e0', eqs0 = modify c e0
+        and e1', eqs1 = modify c e1 in
+        Expr.Binary (pos, op, e0', e1'), eqs0 @ eqs1
+    | Expr.Unary (pos, op, e) ->
+        let e', eqs = modify c e in
+        Expr.Unary (pos, op, e), eqs
+    | Expr.Predicate (pos, c', es) ->
+        (* In the case of a predicate application :
+            - the arguments are filtered to remove duplicate and unused variables.
+            - Equalities are generated matching the duplicates. *)
+        let _, es', eqs = List.fold_left (fun (i, es', eqs) e ->
+          (* Never used. *)
+          if Vars.value state.(c'.vid).(i) = Never then (i+1, es', eqs)
+          else
+            let ri = Vars.find state.(c'.vid).(i) in
+            (* Duplicate. *)
+            if ri != state.(c'.vid).(i) then begin
+              (* No equalities expected since no predicate application in predicate argument. *)
+              let eq, eqs' = modify c (Expr.Binary (pos, "==", e, List.nth es ri.var.vid)) in
+              (i+1, es', eq::eqs' @ eqs)
+            (* Representant. *)
+            end else
+              (* No equalities expected since no predicate application in predicate argument. *)
+              let e', eqs' = modify c e in
+              (i+1, e'::es', eqs' @ eqs)
+          ) (0, [], []) es in
+        Expr.Predicate (pos, c', List.rev es'), eqs
+    | _ -> e, [] in
+
+  (* Apply the modifications to a list of preconditions. *)
+  let modify_preconds (c: int) (es: Expr.t list): Expr.t list =
+    List.fold_left (fun pre e ->
+      match e with
+      | Expr.Binary (pos, "==", Expr.Var (_,v0), Expr.Var (_,v1)) ->
+          let r0 = Vars.find state.(c).(v0.vid)
+          and r1 = Vars.find state.(c).(v1.vid) in
+          if r0 == r1 then pre
+          else Expr.Binary (pos, "==", Expr.Var (r0.var.pos, r0.var), Expr.Var (r1.var.pos, r1.var))::pre
+      | e -> let e', eqs = modify c e in
+          e'::eqs @ pre
+    ) [] es in
+
+  (* Update the type of each predicate. *)
   List.iter (fun c ->
-    let arg, typ = match c.typ with
-      | TyArrow (arg, typ) -> arg,typ
-      | _ -> [], c.typ
-    in
-    let id = c.vid in
-    let _,arg = List.fold_left (fun (i, arg) a ->
-      if arg_uses.(id).(i) = Always then
-        i+1, a::arg
-      else
-        i+1, arg
-    ) (0, []) arg in
-    if arg = [] then
-      c.typ <- typ
-    else
-      c.typ <- TyArrow (List.rev arg, typ)
+    if p.predicates.(c.vid).valid then
+      let arg, typ = match c.typ with
+        | TyArrow (arg, typ) -> arg,typ
+        | _ -> [], c.typ
+      in
+      match Utils.filteri (fun i _ -> keep c.vid i) arg with
+      | [] -> c.typ <- typ
+      | arg -> c.typ <- TyArrow (arg, typ)
   ) p.context;
 
-  (* Update the clause definitions. *)
+  (* Update the definition of the predicates. *)
   for i=0 to (Array.length p.predicates)-1 do
     if p.predicates.(i).valid then begin
+      let old = List.length p.predicates.(i).arguments' in
+      p.predicates.(i).arguments' <- Utils.filteri (fun j _ -> keep i j) p.predicates.(i).arguments';
+
+      let diff = old - List.length p.predicates.(i).arguments' in
+      Logger.log ~mode:"simpl" ("MinArg:" ^ p.predicates.(i).pname.name ^ ": " ^
+        string_of_int (-diff) ^ " " ^ " (" ^ string_of_int (100 * diff / old) ^ "%)\n");
+      Logger.flush ();
+
       List.iter (fun c ->
-        let pre = List.map filter_args c.preconds in
-        let _,post = List.fold_left (fun (i, post) v ->
-          if arg_uses.(c.cname.vid).(i) = Always then i+1,v::post else i+1, post
-        ) (0, []) c.arguments in
-
-        let diff = List.length post - List.length c.arguments in
-        Logger.log ~mode:"simpl" ("MinArg:" ^ c.cname.name ^ ": " ^ string_of_int diff ^ "\n");
-        Logger.flush ();
-
-        c.preconds <- pre;
-        c.arguments <- List.rev post
+        c.preconds <- modify_preconds i c.preconds;
+        c.arguments <- Utils.filteri (fun j _ -> keep i j) c.arguments
       ) p.predicates.(i).clauses
     end
   done;
+
+  (* Update the negative clauses. *)
   List.iter (fun c ->
-    c.preconds <- List.map filter_args c.preconds
+    c.preconds <- modify_preconds 0 c.preconds
   ) p.negatives
+
 
 
 (** Remove the unconstrained variables existentially declared in a clause. *)
@@ -711,11 +845,12 @@ let simplify_clauses (p: script): unit =
       substitute_equalities c
     ) p.predicates.(i).clauses;
   done;
+  List.iter substitute_equalities p.negatives;
   minimize_clause_arguments p;
   for i=0 to (Array.length p.predicates)-1 do
     List.iter minimize_clause_variables p.predicates.(i).clauses
-  done
-
+  done;
+  List.iter minimize_clause_variables p.negatives
 
 (** Rebuild a simplified smt program. *)
 let commands_of_script (p: script): command list =

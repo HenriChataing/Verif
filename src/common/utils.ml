@@ -16,12 +16,22 @@ let iteri (f: int -> 'a -> unit) (xs: 'a list): unit =
   iteraux 0 xs
 
 let mapi (f: int -> 'a -> 'b) (xs: 'a list): 'b list =
-  let rec mapiaux i xs acc =
+  let rec mapaux i xs acc =
     match xs with
     | [] -> List.rev acc
-    | x::xs -> mapiaux (i+1) xs ((f i x)::acc)
+    | x::xs -> mapaux (i+1) xs ((f i x)::acc)
   in
-  mapiaux 0 xs []
+  mapaux 0 xs []
+
+let filteri (f: int -> 'a -> bool) (xs: 'a list): 'a list =
+  let rec filteraux i xs acc =
+    match xs with
+    | [] -> List.rev acc
+    | x::xs ->
+        if f i x then filteraux (i+1) xs (x::acc)
+        else filteraux (i+1) xs acc
+  in
+  filteraux 0 xs []
 
 let rec insert (i: int) (is: int list): int list =
   match is with

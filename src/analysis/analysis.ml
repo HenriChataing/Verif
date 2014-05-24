@@ -117,7 +117,7 @@ let convert_predicate (p: Horn.predicate): predicate =
   if p.valid then
     let args = make_environment p.arguments' in
     { pname = p.pname;
-      arguments' = [||];
+      arguments' = Array.of_list (List.map (fun v -> Var.of_string (vname v)) p.arguments');
       environment = args;
       clauses = List.map (convert_clause args) p.clauses;
       mark = 0; widen = p.widen; head = p.head;
@@ -180,16 +180,16 @@ let rec evaluate_bexpr
   match b with
   | Top -> Abstract1.top man env | Bot -> Abstract1.bottom man env
   | Conj bs ->
-      Logger.log ~mode:"abstract-debug" "Conj: ";
+      Logger.log ~mode:"abstract-debug" "    Conj: ";
       let v = List.fold_left (fun v b ->
         let v' = evaluate_bexpr man env g state b in
-        Logger.log ~lvl:4 " "; Logger.loga ~lvl:4 v';
+        Logger.log ~mode:"abstract-debug" " "; Logger.loga ~mode:"abstract-debug" v';
         Abstract1.meet man v v' (* (evaluate_bexpr man env g state b) *)
       ) (Abstract1.top man env) bs in
-      Logger.log ~lvl:4 " = "; Logger.loga ~lvl:4 v; Logger.newline ~lvl:4 ();
+      Logger.log ~mode:"abstract-debug" " = "; Logger.loga ~lvl:4 v; Logger.newline ~mode:"abstract-debug" ();
       v
   | Disj bs ->
-      Logger.log ~mode:"abstract-debug" "Disj: ";
+      Logger.log ~mode:"abstract-debug" "    Disj: ";
       let v = List.fold_left (fun v b ->
         let v' = evaluate_bexpr man env g state b in
         Logger.log ~mode:"abstract-debug" " "; Logger.loga ~mode:"abstract-debug" v';
@@ -208,7 +208,7 @@ let rec evaluate_bexpr
       and pargs = g.predicates.(p.vid).arguments' in
       let v = Abstract1.change_environment man v (Environment.lce env penv) false in
       let v = Abstract1.substitute_texpr_array man v pargs arg None in
-      Logger.log ~mode:"abstract-debug" ("Pred [" ^ g.predicates.(p.vid).pname.name ^ "]: ");
+      Logger.log ~mode:"abstract-debug" ("    Pred [" ^ g.predicates.(p.vid).pname.name ^ "]: ");
       Logger.loga ~mode:"abstract-debug" v; Logger.newline ~mode:"abstract-debug" ();
       Abstract1.change_environment man v env true
 
@@ -219,16 +219,16 @@ let evaluate_preconds
     (g: script)
     (state: 'a abstract_state)
     (c: clause): 'a Abstract1.t =
-  Logger.log ~mode:"abstract-debug" ("Conj [" ^ c.cname.name ^ "]: ");
+  Logger.log ~mode:"abstract-debug" ("  Conj [" ^ c.cname.name ^ "]: ");
   Logger.newline ~mode:"abstract-debug" ();
   let env = c.variables in
   let v = List.fold_left (fun v b ->
     let v' = evaluate_bexpr man env g state b in
-    Logger.log ~mode:"abstract-debug" "  "; Logger.loga ~mode:"abstract-debug" v';
+    Logger.log ~mode:"abstract-debug" "    "; Logger.loga ~mode:"abstract-debug" v';
     Logger.newline ~mode:"abstract-debug" ();
     Abstract1.meet man v v' (* (evaluate_bexpr man env g state b) *)
   ) (Abstract1.top man env) c.preconds in
-  Logger.log ~mode:"abstract-debug" " = "; Logger.loga ~mode:"abstract-debug" v;
+  Logger.log ~mode:"abstract-debug" "  = "; Logger.loga ~mode:"abstract-debug" v;
   Logger.newline ~mode:"abstract-debug" ();
   Abstract1.change_environment man v c.arguments true
 
@@ -261,8 +261,8 @@ let run_analysis
     let d = List.fold_left (fun d p -> Abstract1.join man d p) (Abstract1.bottom man env) pre in
     let d' = if preds.(c).widen then Abstract1.widening man state.(c) d else d in
 
-    Logger.log ~mode:"asbtract" ("Update [" ^ preds.(c).pname.name ^"]: ");
-    Logger.loga ~mode:"abstract" d'; Logger.newline ~lvl:2 ();
+    Logger.log ~mode:"abstract" ("Update [" ^ preds.(c).pname.name ^"]: ");
+    Logger.loga ~mode:"abstract" d'; Logger.newline ~mode:"abstract" ();
 
     if not (Abstract1.is_eq man state.(c) d') then begin
       state.(c) <- d';
@@ -273,9 +273,10 @@ let run_analysis
   (* Iterate. *)
   let rec iterate (c: int): unit =
     preds.(c).mark <- preds.(c).mark + 1;
+
     (* Waiting for additional values. *)
     if preds.(c).mark < List.length preds.(c).ancestors then begin
-      (* node is widening point => continue (or wait until the end of times). *)
+      (* node is widening point => continue. *)
       if preds.(c).widen then begin
         update c;
         List.iter iterate preds.(c).children
@@ -296,7 +297,7 @@ let run_analysis
   while not !stable do
     stable := true;
     for i=0 to (Array.length preds)-1 do
-      preds.(i).mark <- 0
+      preds.(i).mark <- if preds.(i).head then -1 else 0;
     done;
     for i=0 to (Array.length preds)-1 do
       if preds.(i).head then iterate i
