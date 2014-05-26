@@ -207,7 +207,7 @@ let extract_clauses (p: command list): script =
   let predicates = Array.of_list (List.map (fun n ->
     { pname = n; arguments' = []; environment = []; clauses = [];
       mark = 0; head = false; widen = false;
-      children = []; ancestors = []; valid = true }
+      children = []; ancestors = []; fromloops = []; valid = true }
   ) (List.rev context)) in
   let negatives = ref [] in
   (* To add a dependency. *)
@@ -376,13 +376,23 @@ let substitute_equalities (c: clause): unit =
 
 (** Identify a group of points cutting the loops, and mark them as widening points. *)
 let identify_widening_points (g: script): unit =
+  (* Mark the loop points. *)
+  let rec looppoints (hist: int list) (header: int) =
+    match hist with
+    | [] -> ()
+    | x::xs ->
+        g.predicates.(x).fromloops <- Utils.insert header g.predicates.(x).fromloops;
+        if x <> header then looppoints xs header
+  in
   (* Graph exploration. *)
   let rec walk (hist: int list) (i: int): unit =
     if g.predicates.(i).mark == 0 then begin
       g.predicates.(i).mark <- 1;
       List.iter (walk (i::hist)) g.predicates.(i).children
-    end else if List.mem i hist then
-      g.predicates.(i).widen <- true
+    end else if List.mem i hist then begin
+      g.predicates.(i).widen <- true;
+      looppoints hist i
+    end
   in
   (* Launch the exploration on all nodes with no incoming edges. *)
   for i=0 to (Array.length g.predicates)-1 do
@@ -429,7 +439,10 @@ let make_dot (dot: string) (g: script): unit =
   for i=0 to (Array.length g.predicates)-1 do
     if g.predicates.(i).valid then
       List.iter (fun j ->
-        fprintf f "  %i -> %i;" i j;
+        if Utils.intersect g.predicates.(i).fromloops g.predicates.(j).fromloops <> [] then
+          fprintf f "  %i -> %i [color=red] ;" i j
+        else
+          fprintf f "  %i -> %i;" i j;
         pp_print_newline f ()
       ) g.predicates.(i).children
   done;

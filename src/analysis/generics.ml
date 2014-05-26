@@ -35,6 +35,7 @@ type ('a, 'e, 'c) gen_predicate = {
 
   mutable children: int list;  (* The list of predicates that depends upon this node. *)
   mutable ancestors: int list; (* The number of dependencies. *)
+  mutable fromloops: int list; (* List the loops this point is part of. *)
 
   mutable valid: bool          (* When the predicate has been inlined, it shouldn't be accessed. *)
 }
@@ -46,6 +47,11 @@ type ('p, 'c) gen_script = {
   negatives: 'c list;          (* Remaining, negative clauses. *)
   commands: command list       (* Remaining commands. *)
 }
+
+
+(** Several functions querying the control graph. *)
+let fromloop (script: ('p,'c) gen_script) (loop: int) (c: int) =
+  List.mem loop script.predicates.(c).fromloops
 
 
 (** The iteration function of the static analysis. *)

@@ -122,6 +122,7 @@ let convert_predicate (p: Horn.predicate): predicate =
       clauses = List.map (convert_clause args) p.clauses;
       mark = 0; widen = p.widen; head = p.head;
       children = p.children; ancestors = p.ancestors;
+      fromloops = p.fromloops;
       valid = true
     }
   else
@@ -129,7 +130,7 @@ let convert_predicate (p: Horn.predicate): predicate =
       arguments' = [||]; environment = Environment.make [||] [||];
       clauses = [];
       mark = 0; widen = false; head = false;
-      children = []; ancestors = [];
+      children = []; ancestors = []; fromloops = [];
       valid = false
     }
 
@@ -186,7 +187,8 @@ let rec evaluate_bexpr
         Logger.log ~mode:"abstract-debug" " "; Logger.loga ~mode:"abstract-debug" v';
         Abstract1.meet man v v' (* (evaluate_bexpr man env g state b) *)
       ) (Abstract1.top man env) bs in
-      Logger.log ~mode:"abstract-debug" " = "; Logger.loga ~lvl:4 v; Logger.newline ~mode:"abstract-debug" ();
+      Logger.log ~mode:"abstract-debug" " = "; Logger.loga ~mode:"abstract-debug" v;
+      Logger.newline ~mode:"abstract-debug" ();
       v
   | Disj bs ->
       Logger.log ~mode:"abstract-debug" "    Disj: ";
@@ -255,11 +257,11 @@ let run_analysis
   let stable = ref false in
 
   (* Update the value at one point. *)
-  let update (c: int): unit =
+  let update ?(dowiden: bool = true) (c: int): unit =
     let pre = List.map (evaluate_preconds man g state) preds.(c).clauses in
     let env = preds.(c).environment in
     let d = List.fold_left (fun d p -> Abstract1.join man d p) (Abstract1.bottom man env) pre in
-    let d' = if preds.(c).widen then Abstract1.widening man state.(c) d else d in
+    let d' = if preds.(c).widen && dowiden then Abstract1.widening man state.(c) d else d in
 
     Logger.log ~mode:"abstract" ("Update [" ^ preds.(c).pname.name ^"]: ");
     Logger.loga ~mode:"abstract" d'; Logger.newline ~mode:"abstract" ();
@@ -270,43 +272,85 @@ let run_analysis
     end
   in
 
-  (* Iterate. *)
-  let rec iterate (c: int): unit =
-    preds.(c).mark <- preds.(c).mark + 1;
-
-    (* Waiting for additional values. *)
-    if preds.(c).mark < List.length preds.(c).ancestors then begin
-      (* node is widening point => continue. *)
-      if preds.(c).widen then begin
-        update c;
-        List.iter iterate preds.(c).children
-      end
-    (* All values are here. *)
-    end else if preds.(c).head || preds.(c).mark = List.length preds.(c).ancestors then begin
-      (* Compute the value at c. *)
-      update c;
-      (* Continue only if the point is not a widening point. *)
-      if not preds.(c).widen then
-        List.iter iterate preds.(c).children
-    (* Already went through here, stop. *)
-    end else ()
+  (* Loop ancestors. *)
+  let loop_ancestors (loop: int) (c: int) =
+    List.fold_left (fun n c' ->
+      if List.mem loop preds.(c').fromloops then n else n+1) 0 preds.(c).ancestors
+  in
+  (* Clear the marks. *)
+  let clear_marks (loop: int): unit =
+    for i=0 to (Array.length preds)-1 do
+      if i = loop then
+        preds.(i).mark <- loop_ancestors loop i
+      else if List.mem loop preds.(i).fromloops then
+        preds.(i).mark <- 0
+    done
   in
 
-  (* Iterate until stabilization. *)
-  stable := false;
-  while not !stable do
-    stable := true;
-    for i=0 to (Array.length preds)-1 do
-      preds.(i).mark <- if preds.(i).head then -1 else 0;
-    done;
-    for i=0 to (Array.length preds)-1 do
-      if preds.(i).head then iterate i
-    done;
+  (* Iterate. *)
+  let rec iterate (loop: int option) (c: int): unit =
+    begin match loop with
+    | None ->
+        Logger.log ~mode:"abstract-debug" ("Iterate: [] " ^ preds.(c).pname.name ^ "\n")
+    | Some cloop ->
+        Logger.log ~mode:"abstract-debug"
+          ("Iterate: [" ^ preds.(cloop).pname.name ^ "] " ^ preds.(c).pname.name ^ "\n")
+    end;
+
+    preds.(c).mark <- preds.(c).mark + 1;
+
+    (* Loop header. *)
+    if preds.(c).widen then begin
+      (* Reached the stop point. *)
+      if loop = Some c then ()
+      (* Launch another loop iteration. *)
+      else if preds.(c).mark = loop_ancestors c c then begin
+        update ~dowiden:false c;
+        (* Widen and stabilize. *)
+        let invariant = ref (Abstract1.bottom man preds.(c).environment) in
+        while !invariant <> state.(c) do
+          invariant := state.(c);
+          Utils.iteron (fromloop g c) (iterate (Some c)) preds.(c).children;
+          update c; clear_marks c
+        done;
+        (* Narrow. *)
+        Utils.iteron (fromloop g c) (iterate (Some c)) preds.(c).children;
+        update ~dowiden:false c; clear_marks c;
+        (* Leave the loop. *)
+        for c'=0 to (Array.length preds)-1 do
+          if fromloop g c c' then
+            Utils.iteron (fun c' -> not (fromloop g c c')) (iterate loop) preds.(c').children
+        done
+      end
+
+    (* Not a loop header. *)
+    end else begin
+      (* Waiting for additional values. *)
+      if preds.(c).mark < List.length preds.(c).ancestors then ()
+      (* All values are here. *)
+      else if preds.(c).mark = List.length preds.(c).ancestors then begin
+        (* Compute the value at c. *)
+        update c;
+        match loop with
+        | None -> List.iter (iterate loop) preds.(c).children
+        | Some cloop -> Utils.iteron (fromloop g cloop) (iterate loop) preds.(c).children
+      end
+    end
+  in
+
+  (* Start the iteration at all header points. *)
+  for i=0 to (Array.length preds)-1 do
+    preds.(i).mark <- if preds.(i).head then -1 else 0;
+  done;
+  for i=0 to (Array.length preds)-1 do
+    if preds.(i).head then iterate None i
   done;
 
   for i=0 to (Array.length state)-1 do
-    Logger.log ~mode:"abstract" (preds.(i).pname.name ^ ": ");
-    Logger.loga ~mode:"abstract" state.(i); Logger.newline ~mode:"abstract" ()
+    if preds.(i).valid then begin
+      Logger.log ~mode:"abstract" (preds.(i).pname.name ^ ": ");
+      Logger.loga ~mode:"abstract" state.(i); Logger.newline ~mode:"abstract" ()
+    end
   done;
 
   state

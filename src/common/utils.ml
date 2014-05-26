@@ -15,6 +15,11 @@ let iteri (f: int -> 'a -> unit) (xs: 'a list): unit =
   in
   iteraux 0 xs
 
+let rec iteron (g: 'a -> bool) (f: 'a -> unit) (xs: 'a list): unit =
+  match xs with
+  | [] -> ()
+  | x::xs -> if g x then f x; iteron g f xs
+
 let mapi (f: int -> 'a -> 'b) (xs: 'a list): 'b list =
   let rec mapaux i xs acc =
     match xs with
@@ -56,6 +61,15 @@ let rec union (xs: int list) (ys: int list): int list =
       if x = y then x::(union xs ys)
       else if x < y then x::(union xs (y::ys))
       else y::(union (x::xs) ys)
+
+let rec intersect (xs: int list) (ys: int list): int list =
+  match xs, ys with
+  | [], _ -> []
+  | _, [] -> []
+  | x::xs, y::ys ->
+      if x = y then x::(intersect xs ys)
+      else if x < y then intersect xs (y::ys)
+      else intersect (x::xs) ys
 
 let difference (xs: 'a list) (ys: 'a list): 'a list =
   List.filter (fun x -> not (List.mem x ys)) xs
