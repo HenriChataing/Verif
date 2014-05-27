@@ -82,7 +82,7 @@ let rec bexpr_of_expr
       and ne = texpr_of_expr env (Binary (p, "-", e1, e0)) in
       let comps = match op with
         | "==" -> [Tcons1.EQ, e]
-        | "<>" -> [Tcons1.SUP, e; Tcons1.SUP, e]
+        | "<>" -> [Tcons1.SUP, e; Tcons1.SUP, ne]
         | ">=" -> [Tcons1.SUPEQ, e]
         | ">" -> [Tcons1.SUP, e]
         | "<=" -> [Tcons1.SUPEQ, ne]
@@ -92,7 +92,7 @@ let rec bexpr_of_expr
       let bs = List.map (fun (cmp, te) -> Atom (Left (Tcons1.make te cmp))) comps in
       begin match bs with
       | [b] -> b
-      | _ -> Conj bs
+      | _ -> Disj bs
       end
   | Predicate (_, c, es) ->
       let arg = List.map (texpr_of_expr env) es in

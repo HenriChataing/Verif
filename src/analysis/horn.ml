@@ -439,7 +439,8 @@ let make_dot (dot: string) (g: script): unit =
   for i=0 to (Array.length g.predicates)-1 do
     if g.predicates.(i).valid then
       List.iter (fun j ->
-        if Utils.intersect g.predicates.(i).fromloops g.predicates.(j).fromloops <> [] then
+        let inter = Utils.intersect g.predicates.(i).fromloops g.predicates.(j).fromloops in
+        if inter <> [] then
           fprintf f "  %i -> %i [color=red] ;" i j
         else
           fprintf f "  %i -> %i;" i j;
@@ -665,23 +666,19 @@ let minimize_clause_arguments (p: script): unit =
   (* Join the partitions of two local states (as coming from different clauses). *)
   let join_lstates lstate0 lstate1 dest =
     let size = Array.length lstate0 in
-    if size < 2 then ()
-    else begin
-      (* Reset the destination. *)
-      for i=0 to size-1 do
-        dest.(i).parent <- Utils.Left (join (Vars.value lstate0.(i)) (Vars.value lstate1.(i)))
-      done;
-
-      (* Derive the equivalence classes. *)
-      for i=0 to size-2 do
-        for j=i+1 to size-1 do
-          (* i and j are in the same class iff they are in both states. *)
-          if Vars.find lstate0.(i) == Vars.find lstate0.(j) &&
-             Vars.find lstate1.(i) == Vars.find lstate1.(j) then
-            Vars.union dest.(i) dest.(j)
-        done
+    (* Reset the destination. *)
+    for i=0 to size-1 do
+      dest.(i).parent <- Utils.Left (join (Vars.value lstate0.(i)) (Vars.value lstate1.(i)))
+    done;
+    (* Derive the equivalence classes. *)
+    for i=0 to size-2 do
+      for j=i+1 to size-1 do
+        (* i and j are in the same class iff they are in both states. *)
+        if Vars.find lstate0.(i) == Vars.find lstate0.(j) &&
+           Vars.find lstate1.(i) == Vars.find lstate1.(j) then
+          Vars.union dest.(i) dest.(j)
       done
-    end in
+    done in
 
   (* Update the value of a single predicate. *)
   let update_predicate (c: int): unit =
@@ -702,7 +699,7 @@ let minimize_clause_arguments (p: script): unit =
            For each iteration :
             - lstate0 serves to compute the value of the clause
             - lstate1 contains the join value
-            - lstate2 servers to compute the join value. *)
+            - lstate2 serves to compute the join value. *)
         evaluate_preconds !lstate1 cl.preconds;
         List.iter (fun cl ->
           reset !lstate0;
@@ -740,10 +737,10 @@ let minimize_clause_arguments (p: script): unit =
     classes of the predicate arguments, have been computed. To determine which
     variable should be kept :
      - if the class representant is unused, remove the variable
-     - else if equal to the representant, keep the variable
+     - else if is the representant, keep the variable
      - else remove
-    Of course, equalities are generated where predicates are used to
-    make up for the missing arguments. *)
+    Equalities are generated where predicates are used to
+    make up for the missing arguments and constraints. *)
 
   let keep (c: int) (i: int): bool =
     if Vars.value state.(c).(i) = Never then false
@@ -761,41 +758,47 @@ let minimize_clause_arguments (p: script): unit =
         Expr.Binary (pos, op, e0', e1'), eqs0 @ eqs1
     | Expr.Unary (pos, op, e) ->
         let e', eqs = modify c e in
-        Expr.Unary (pos, op, e), eqs
+        Expr.Unary (pos, op, e'), eqs
     | Expr.Predicate (pos, c', es) ->
         (* In the case of a predicate application :
             - the arguments are filtered to remove duplicate and unused variables.
             - Equalities are generated matching the duplicates. *)
         let _, es', eqs = List.fold_left (fun (i, es', eqs) e ->
-          (* Never used. *)
-          if Vars.value state.(c'.vid).(i) = Never then (i+1, es', eqs)
+          let ri = Vars.find state.(c'.vid).(i) in
+          (* Check for inherited constraints. *)
+          let inherited =
+            if ri != state.(c'.vid).(i) then
+              [Expr.Binary (pos, "==", e, List.nth es ri.var.vid)]
+            else
+              []
+          in
+          (* Delete or not the argument. *)
+          if keep c'.vid i then
+            let e', eqs' = modify c e in
+            i+1, e'::es', eqs' @ inherited @ eqs
           else
-            let ri = Vars.find state.(c'.vid).(i) in
-            (* Duplicate. *)
-            if ri != state.(c'.vid).(i) then begin
-              (* No equalities expected since no predicate application in predicate argument. *)
-              let eq, eqs' = modify c (Expr.Binary (pos, "==", e, List.nth es ri.var.vid)) in
-              (i+1, es', eq::eqs' @ eqs)
-            (* Representant. *)
-            end else
-              (* No equalities expected since no predicate application in predicate argument. *)
-              let e', eqs' = modify c e in
-              (i+1, e'::es', eqs' @ eqs)
-          ) (0, [], []) es in
+            i+1, es', inherited @ eqs
+        ) (0, [], []) es in
         Expr.Predicate (pos, c', List.rev es'), eqs
     | _ -> e, [] in
 
   (* Apply the modifications to a list of preconditions. *)
-  let modify_preconds (c: int) (es: Expr.t list): Expr.t list =
+  let rec modify_preconds (c: int) (es: Expr.t list): Expr.t list =
     List.fold_left (fun pre e ->
       match e with
-      | Expr.Binary (pos, "==", Expr.Var (_,v0), Expr.Var (_,v1)) ->
+      | Expr.Binary (pos, "==", Expr.Var (_,v0), Expr.Var (_,v1)) when isarg v0 && isarg v1 ->
           let r0 = Vars.find state.(c).(v0.vid)
           and r1 = Vars.find state.(c).(v1.vid) in
           if r0 == r1 then pre
-          else Expr.Binary (pos, "==", Expr.Var (r0.var.pos, r0.var), Expr.Var (r1.var.pos, r1.var))::pre
-      | e -> let e', eqs = modify c e in
-          e'::eqs @ pre
+          else
+            Expr.Binary (pos, "==",
+              Expr.Var (r0.var.pos, r0.var),
+              Expr.Var (r1.var.pos, r1.var)
+            )::pre
+      | e ->
+          let e', eqs = modify c e in
+          let eqs' = modify_preconds c eqs in
+          e'::eqs' @ pre
     ) [] es in
 
   (* Update the type of each predicate. *)
