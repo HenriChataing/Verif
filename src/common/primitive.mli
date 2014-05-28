@@ -34,3 +34,5 @@ val lt0: t -> bool
 (** Conversion to Aron coefficients. *)
 val to_coeff: t -> Apron.Coeff.t
 
+(** Converion from Apron coefficients. *)
+val of_coeff: Apron.Coeff.t -> t

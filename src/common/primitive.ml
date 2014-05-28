@@ -48,7 +48,7 @@ let mul (l0: t) (l1: t): t =
 let neg (l: t): t =
   match l with
   | Int n -> Int (-n) | Float f -> Float (-.f)
-  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on primitives" 
+  | _ -> Errors.fatal [Lexing.dummy_pos] "Bad operation on primitives"
 
 (** Is the primitive nul. *)
 let eq0 (l: t): bool =
@@ -67,4 +67,12 @@ let to_coeff (p: t): Coeff.t =
   | Float f -> Coeff.s_of_float f
   | Bool true -> Coeff.s_of_int 1
   | Bool false -> Coeff.s_of_int 0
+
+(** Conversion from Apron coefficients. *)
+let of_coeff (c: Coeff.t): t =
+  match c with
+  | Coeff.Scalar (Scalar.Float f) -> Float f
+  | Coeff.Scalar (Scalar.Mpqf m) -> Float (Mpqf.to_float m)
+  | Coeff.Scalar (Scalar.Mpfrf m) -> Float (Mpfrf.to_float m)
+  | _ -> Errors.fatal [] "Non converttible coefficient"
 

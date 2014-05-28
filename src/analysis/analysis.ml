@@ -100,6 +100,58 @@ let rec bexpr_of_expr
   | _ -> Errors.fatal' (Expr.position e) "This expression is not boolean"
 
 
+(** Convert a tree expression to an expression. *)
+let expr_of_texpr (context: var list) (te: Texpr1.t): Expr.t =
+  let from_context x =
+    List.find (fun v -> vname v = x) context in
+  let operators = [
+    (Texpr1.Add, "+"); (Texpr1.Sub, "-");
+    (Texpr1.Mul, "*"); (Texpr1.Div, "/") ] in
+  let rec convert te =
+    match te with
+    | Texpr1.Cst c -> Expr.Prim (undefined_position, Primitive.of_coeff c)
+    | Texpr1.Var v -> Expr.Var (undefined_position, from_context (Var.to_string v))
+    | Texpr1.Unop (Texpr1.Neg, te, _, _) -> Expr.Unary (undefined_position, "-", convert te)
+    | Texpr1.Binop (op, te0, te1, _, _) ->
+        let e0 = convert te0
+        and e1 = convert te1 in
+        begin try
+          Expr.Binary (undefined_position, List.assoc op operators, e0, e1)
+        with Not_found -> Errors.fatal [] "Unsupported Apron operator"
+        end
+    | _ -> Errors.fatal [] "Unsupported Apron expression"
+  in
+  convert (Texpr1.to_expr te)
+
+
+(** Convert a constraint on a tree expression to an expression. *)
+let expr_of_tcons (context: var list) (tc: Tcons1.t): Expr.t =
+  let e = expr_of_texpr context (Tcons1.get_texpr1 tc) in
+  match Tcons1.get_typ tc with
+  | Tcons1.EQ -> Expr.Binary (undefined_position, "==", e,
+                   Expr.Prim (undefined_position, Primitive.Int 0))
+  | Tcons1.DISEQ -> Expr.Binary (undefined_position, "<>", e,
+                      Expr.Prim (undefined_position, Primitive.Int 0))
+  | Tcons1.SUP -> Expr.Binary (undefined_position, ">", e,
+                    Expr.Prim (undefined_position, Primitive.Int 0))
+  | Tcons1.SUPEQ -> Expr.Binary (undefined_position, ">=", e,
+                      Expr.Prim (undefined_position, Primitive.Int 0))
+  | _ -> Errors.fatal [] "Unsupported Apron constraint type"
+
+
+(** Convert an invariant to a list of constraints. *)
+let exprs_of_value
+    (context: var list)
+    (man: 'a Manager.t)
+    (d: 'a Abstract1.t): Expr.t list =
+  let tcs = Abstract1.to_tcons_array man d in
+  let es = ref [] in
+  for i=0 to (Tcons1.array_length tcs)-1 do
+    es := (expr_of_tcons context (Tcons1.array_get tcs i))::!es
+  done;
+  !es
+
+
 (** Convert a clause. *)
 let convert_clause (args: Environment.t) (c: Horn.clause): clause =
   let env = make_environment c.variables in
@@ -142,7 +194,6 @@ let convert_script (s: Horn.script): script =
     negatives = List.map (convert_clause (Environment.make [||] [||])) s.negatives;
     commands = s.commands
   }
-
 
 (** Abstract state. Each predicate is given an abstract value. *)
 type 'a abstract_state = 'a Abstract1.t array
@@ -365,4 +416,20 @@ let check_negatives
     let d = evaluate_preconds man g state c in
     Abstract1.is_bottom man d
   ) g.negatives
+
+
+(** Insert the computed invariant as preconditions of clauses relevant
+  to a loop predicate. *)
+let insert_invariant
+    (man: 'a Manager.t)
+    (state: 'a abstract_state)
+    (ascript: script)
+    (script: Horn.script): unit =
+  for i=0 to (Array.length script.predicates)-1 do
+    if script.predicates.(i).valid && script.predicates.(i).widen then begin
+      let es = exprs_of_value script.predicates.(i).arguments' man state.(i) in
+      List.iter (fun c -> c.preconds <- es @ c.preconds) script.predicates.(i).clauses
+    end
+  done
+
 
