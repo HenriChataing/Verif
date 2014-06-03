@@ -4,6 +4,7 @@ open Smtlib
 open Expressions
 open Vars
 open Types
+open UnionFind
 open Generics
 
 module IntMap = Map.Make (struct
@@ -293,7 +294,8 @@ let extract_clauses (p: command list): script =
   { context = context;
     predicates = predicates;
     commands = commands;
-    negatives = !negatives }
+    negatives = !negatives;
+    reducible = true }
 
 
 (** Pretty print a horn clause (to something resembling the syntax of Prolog) *)
@@ -376,47 +378,103 @@ let substitute_equalities (c: clause): unit =
 
 (** Identify a group of points cutting the loops, and mark them as widening points. *)
 let identify_widening_points (g: script): unit =
-  (* Mark the loop points. *)
-  let rec looppoints (hist: int list) (header: int) =
-    match hist with
-    | [] -> ()
-    | x::xs ->
-        g.predicates.(x).fromloops <- Utils.insert header g.predicates.(x).fromloops;
-        if x <> header then looppoints xs header
-  in
-  (* Graph exploration. *)
-  let rec walk (hist: int list) (i: int): unit =
-    if g.predicates.(i).mark == 0 then begin
+  let size = Array.length g.predicates in
+  (* Initialize the dominants. *)
+  let dominants = Array.make size [] in
+  for i=0 to size-1 do
+    dominants.(i) <- [i]
+  done;
+  let stable = ref false in
+  (* Compute the dominants. *)
+  while not !stable do
+    stable := true;
+    for i=0 to size-1 do
+      if g.predicates.(i).valid then begin
+        let doms =
+          Utils.insert i (
+            Utils.intersect_list (
+              List.map (fun p -> dominants.(p))
+              g.predicates.(i).ancestors)) in
+        if doms <> dominants.(i) then begin
+          stable := false;
+          dominants.(i) <- doms
+        end
+      end
+    done
+  done;
+
+  (* Query the previously built relation. *)
+  let dominant n d =
+    List.mem d dominants.(n) in
+
+  (* Compute the list of back edges. *)
+  let backedges = ref [] in
+  for i=0 to size-1 do
+    if g.predicates.(i).valid then
+      List.iter (fun d ->
+        if dominant i d then begin
+          g.predicates.(i).children <- Utils.delete d g.predicates.(i).children;
+          g.predicates.(d).ancestors <- Utils.delete i g.predicates.(d).ancestors;
+          backedges := (i, d)::!backedges
+        end
+      ) g.predicates.(i).children
+  done;
+
+  (* Check reducability. *)
+  g.reducible <- true;
+  let rec walk hist i =
+    if g.predicates.(i).mark = 0 then begin
       g.predicates.(i).mark <- 1;
       List.iter (walk (i::hist)) g.predicates.(i).children
-    end else if List.mem i hist then begin
-      g.predicates.(i).widen <- true;
-      looppoints hist i
-    end
+    end else if List.mem i hist then
+      g.reducible <- false
   in
-  (* Launch the exploration on all nodes with no incoming edges. *)
-  for i=0 to (Array.length g.predicates)-1 do
-    if g.predicates.(i).ancestors = [] then begin
+
+  for i=0 to size-1 do
+    if g.predicates.(i).valid && g.predicates.(i).ancestors = [] then begin
       g.predicates.(i).head <- true;
       walk [] i
     end
   done;
-  (* If it isn't enough, pick up other nodes until all nodes have been visited. *)
-  let finished = ref false in
-  while not !finished do
-    finished := true;
-    for i=0 to (Array.length g.predicates)-1 do
-      if g.predicates.(i).mark == 0 then begin
-        finished := false;
+  let explored = ref false in
+  while not !explored do
+    explored := true;
+    for i=0 to size-1 do
+      if g.predicates.(i).valid && g.predicates.(i).mark = 0 then begin
+        explored := false;
         g.predicates.(i).head <- true;
         walk [] i
       end
     done
   done;
-  (* Reinitialize the markers, and update the list of children. *)
-  for i=0 to (Array.length g.predicates)-1 do
+
+
+  (* Reinsert the backedges. *)
+  List.iter (fun (n,d) ->
+    g.predicates.(n).children <- Utils.insert d g.predicates.(n).children;
+    g.predicates.(d).ancestors <- Utils.insert n g.predicates.(d).ancestors) !backedges;
+
+  (* Reset the marks. *)
+  for i=0 to size-1 do
     g.predicates.(i).mark <- 0
-  done
+  done;
+
+  if g.reducible then begin
+    (* Mark the loop points. *)
+    let rec looppoints (header: int) (i: int): unit =
+      if header = i then ()
+      else begin
+        g.predicates.(i).fromloops <- Utils.insert header g.predicates.(i).fromloops;
+        List.iter (looppoints header) g.predicates.(i).ancestors
+      end in
+
+    List.iter (fun (n, d) ->
+      g.predicates.(d).widen <- true;
+      g.predicates.(d).fromloops <- Utils.insert d g.predicates.(d).fromloops;
+      looppoints d n
+    ) !backedges
+  end
+
 
 
 (** Produce a DOT file with the dependency graph. *)
@@ -581,18 +639,18 @@ let join (u: arguse) (u': arguse): arguse =
     that keeps for each variable the contrained state (=the dimension of the abstract value)
     and the equalities between variables. *)
 let minimize_clause_arguments (p: script): unit =
-
   (* Make fresh union variables for the arguments of a predicate. *)
-  let make_uvars (xs: var list) =
-    Array.of_list (List.map (fun x -> make_uvar x Never) xs)
-  in
+  let make_uvars xs =
+    Array.of_list (List.map (fun x -> make_uvar x Never) xs) in
 
   (* The abstract state. *)
-  let state = Array.map (fun p -> if p.valid then make_uvars p.arguments' else [||]) p.predicates in
+  let state = Array.map (fun p ->
+    if p.valid then make_uvars p.arguments'
+    else [||]) p.predicates in
 
   (* Update the usage of an argument in a local state. *)
   let update x u lstate =
-    Vars.update lstate.(x.vid) (join u) in
+    UnionFind.update lstate.(x.vid) (join u) in
 
   (* Reset a local state. *)
   let reset lstate =
@@ -602,15 +660,15 @@ let minimize_clause_arguments (p: script): unit =
 
   (* Merge two equivalence classes == insert an equality. *)
   let equals x y lstate =
-    Vars.union ~join:join lstate.(x.vid) lstate.(y.vid) in
+    UnionFind.union ~join:join lstate.(x.vid) lstate.(y.vid) in
 
   (* Retrieve the usage of an argument. *)
   let usage c i =
-    Vars.value state.(c.vid).(i) in
+    UnionFind.value state.(c.vid).(i) in
 
   (* Check whether two arguments are in the same class. *)
   let same c i j =
-    Vars.find state.(c.vid).(i) == Vars.find state.(c.vid).(j) in
+    UnionFind.find state.(c.vid).(i) == UnionFind.find state.(c.vid).(j) in
 
   (* Evaluate an expression. *)
   let rec evaluate lstate e =
@@ -651,14 +709,14 @@ let minimize_clause_arguments (p: script): unit =
       (* Build the equivalence classes. *)
       let equivs = ref IntMap.empty in
       for j=0 to (Array.length lstate)-1 do
-        let c = (Vars.find lstate.(j)).var.vid in
+        let c = (UnionFind.find lstate.(j)).var.vid in
         let cur = try IntMap.find c !equivs with Not_found -> [] in
         equivs := IntMap.add c (lstate.(j).var::cur) !equivs
       done;
 
       IntMap.iter (fun c vs ->
         Logger.log "[ "; List.iter (fun uv -> Logger.log (vname uv ^ " ")) vs;
-        if Vars.value lstate.(c) = Always then Logger.log "] = [ Always ]\n"
+        if UnionFind.value lstate.(c) = Always then Logger.log "] = [ Always ]\n"
         else Logger.log "] = [ Never ]\n"
       ) !equivs
     ) in
@@ -668,15 +726,15 @@ let minimize_clause_arguments (p: script): unit =
     let size = Array.length lstate0 in
     (* Reset the destination. *)
     for i=0 to size-1 do
-      dest.(i).parent <- Utils.Left (join (Vars.value lstate0.(i)) (Vars.value lstate1.(i)))
+      dest.(i).parent <- Utils.Left (join (UnionFind.value lstate0.(i)) (UnionFind.value lstate1.(i)))
     done;
     (* Derive the equivalence classes. *)
     for i=0 to size-2 do
       for j=i+1 to size-1 do
         (* i and j are in the same class iff they are in both states. *)
-        if Vars.find lstate0.(i) == Vars.find lstate0.(j) &&
-           Vars.find lstate1.(i) == Vars.find lstate1.(j) then
-          Vars.union dest.(i) dest.(j)
+        if UnionFind.find lstate0.(i) == UnionFind.find lstate0.(j) &&
+           UnionFind.find lstate1.(i) == UnionFind.find lstate1.(j) then
+          UnionFind.union dest.(i) dest.(j)
       done
     done in
 
@@ -714,12 +772,23 @@ let minimize_clause_arguments (p: script): unit =
       end
   in
 
+  (* Compare two states. *)
+  let compare lstate0 lstate1 =
+    let eq = ref true in
+    for i=0 to (Array.length lstate0)-1 do
+      if UnionFind.value lstate0.(i) <> UnionFind.value lstate1.(i) then eq := false
+    done in
+
   (* Run the analysis. *)
-  for i=0 to (Array.length p.predicates)-1 do
-    p.predicates.(i).mark <- if p.predicates.(i).head then -1 else 0;
-  done;
-  for i=0 to (Array.length p.predicates)-1 do
-    if p.predicates.(i).head then Generics.iterate p.predicates update_predicate i
+  let stable = ref false in
+  while not !stable do
+    stable := true;
+    for i=0 to (Array.length p.predicates)-1 do
+      p.predicates.(i).mark <- if p.predicates.(i).head then -1 else 0;
+    done;
+    for i=0 to (Array.length p.predicates)-1 do
+      if p.predicates.(i).head then Generics.iterate p.predicates update_predicate i
+    done
   done;
 
   (* Display the results. *)
@@ -743,14 +812,14 @@ let minimize_clause_arguments (p: script): unit =
     make up for the missing arguments and constraints. *)
 
   let keep (c: int) (i: int): bool =
-    if Vars.value state.(c).(i) = Never then false
-    else Vars.find state.(c).(i) == state.(c).(i) in
+    if UnionFind.value state.(c).(i) = Never then false
+    else UnionFind.find state.(c).(i) == state.(c).(i) in
 
   (* Apply the modifications to an expression. *)
   let rec modify (c: int) (e: Expr.t): Expr.t * Expr.t list =
     match e with
     | Expr.Var (pos,v) when isarg v ->
-        let v' = Vars.find state.(c).(v.vid) in
+        let v' = UnionFind.find state.(c).(v.vid) in
         Expr.Var (pos,v'.var), []
     | Expr.Binary (pos, op, e0, e1) ->
         let e0', eqs0 = modify c e0
@@ -764,7 +833,7 @@ let minimize_clause_arguments (p: script): unit =
             - the arguments are filtered to remove duplicate and unused variables.
             - Equalities are generated matching the duplicates. *)
         let _, es', eqs = List.fold_left (fun (i, es', eqs) e ->
-          let ri = Vars.find state.(c'.vid).(i) in
+          let ri = UnionFind.find state.(c'.vid).(i) in
           (* Check for inherited constraints. *)
           let inherited =
             if ri != state.(c'.vid).(i) then
@@ -787,8 +856,8 @@ let minimize_clause_arguments (p: script): unit =
     List.fold_left (fun pre e ->
       match e with
       | Expr.Binary (pos, "==", Expr.Var (_,v0), Expr.Var (_,v1)) when isarg v0 && isarg v1 ->
-          let r0 = Vars.find state.(c).(v0.vid)
-          and r1 = Vars.find state.(c).(v1.vid) in
+          let r0 = UnionFind.find state.(c).(v0.vid)
+          and r1 = UnionFind.find state.(c).(v1.vid) in
           if r0 == r1 then pre
           else
             Expr.Binary (pos, "==",
@@ -852,10 +921,10 @@ let minimize_clause_variables (c: clause): unit =
 
 
 (** Try reducing the number of arguments and variables. *)
-let simplify_clauses (p: script): unit =
+let simplify_clauses ?(inline: bool = true) (p: script): unit =
   Logger.log ~mode:"simpl" "### Clause minimalization ###"; Logger.newline ~mode:"simpl" ();
   standardise_arguments p;
-  inline_clauses p;
+  if inline then inline_clauses p;
   for i=0 to (Array.length p.predicates)-1 do
     List.iter (fun c ->
       substitute_equalities c

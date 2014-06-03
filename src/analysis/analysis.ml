@@ -192,7 +192,8 @@ let convert_script (s: Horn.script): script =
   { context = s.context;
     predicates = Array.map convert_predicate s.predicates;
     negatives = List.map (convert_clause (Environment.make [||] [||])) s.negatives;
-    commands = s.commands
+    commands = s.commands;
+    reducible = s.reducible
   }
 
 (** Abstract state. Each predicate is given an abstract value. *)
@@ -389,13 +390,31 @@ let run_analysis
     end
   in
 
-  (* Start the iteration at all header points. *)
-  for i=0 to (Array.length preds)-1 do
-    preds.(i).mark <- if preds.(i).head then -1 else 0;
-  done;
-  for i=0 to (Array.length preds)-1 do
-    if preds.(i).head then iterate None i
-  done;
+  (** REDUCIBLE GRAPHS **)
+  if g.reducible then begin
+    (* Start the iteration at all header points. *)
+    for i=0 to (Array.length preds)-1 do
+      preds.(i).mark <- if preds.(i).head then -1 else 0;
+    done;
+    for i=0 to (Array.length preds)-1 do
+      if preds.(i).head then iterate None i
+    done;
+
+  (** NON REDUCIBLE GRAPHS **)
+  end else begin
+    let stable = ref false in
+    while not !stable do
+      stable := true;
+      for i=0 to (Array.length preds)-1 do
+        if preds.(i).valid then begin
+          let d = state.(i) in
+          update i;
+          if not (Abstract1.is_eq man d state.(i)) then
+            stable := false
+        end
+      done
+    done
+  end;
 
   for i=0 to (Array.length state)-1 do
     if preds.(i).valid then begin
@@ -403,7 +422,6 @@ let run_analysis
       Logger.loga ~mode:"abstract" state.(i); Logger.newline ~mode:"abstract" ()
     end
   done;
-
   state
 
 

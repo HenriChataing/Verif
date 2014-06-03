@@ -45,7 +45,8 @@ type ('p, 'c) gen_script = {
   context: var list;           (* List of predicates. *)
   predicates: 'p array;        (* Definition of each predicate. *)
   negatives: 'c list;          (* Remaining, negative clauses. *)
-  commands: command list       (* Remaining commands. *)
+  commands: command list;      (* Remaining commands. *)
+  mutable reducible: bool      (* True iff the CFG is reducible. *)
 }
 
 

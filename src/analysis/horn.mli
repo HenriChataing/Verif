@@ -55,7 +55,7 @@ val string_of_clause: clause -> string
 
 
 (** Simplify the clauses by removing irrelevant arguments. *)
-val simplify_clauses: script -> unit
+val simplify_clauses: ?inline:bool -> script -> unit
 
 (** Rebuild a simplified smt program. *)
 val commands_of_script: script -> command list

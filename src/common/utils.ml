@@ -71,6 +71,11 @@ let rec intersect (xs: int list) (ys: int list): int list =
       else if x < y then intersect xs (y::ys)
       else intersect (x::xs) ys
 
+let rec intersect_list (xss: int list list): int list =
+  match xss with
+  | [] -> [] | [xs] -> xs
+  | xs::ys::xss -> intersect_list ((intersect xs ys)::xss)
+
 let difference (xs: 'a list) (ys: 'a list): 'a list =
   List.filter (fun x -> not (List.mem x ys)) xs
 
