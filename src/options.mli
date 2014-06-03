@@ -12,6 +12,9 @@ val smt2_file: string ref
 (** Do abstract interpretation. *)
 val run_analysis: bool ref
 
+(** Authorize inlining of predicates. *)
+val do_inline: bool ref
+
 (** The value domain of the analysis. *)
 val value_domain: string ref
 

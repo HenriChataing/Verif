@@ -5,7 +5,7 @@ let dot_file = ref ""
 let smt2_file = ref ""
 let run_analysis = ref true
 let value_domain = ref "box"
-
+let do_inline = ref true
 
 (* Check proposed smt2 file. *)
 let read_smt2 = Arg.String (fun s ->
@@ -33,6 +33,7 @@ let options = Arg.align [
   ("-v", Arg.Int (fun v -> Logger.set_verbose v), " toggle verbose mode");
   ("-c", Arg.Unit (fun _ -> pprint_clauses := true), " pretty print the horn clauses");
   ("--no-analysis", Arg.Unit (fun _ -> run_analysis := false), " perform only the simplifications");
+  ("--no-inline", Arg.Unit (fun _ -> do_inline := false), " do not inline any predicate");
   ("-d", read_dot, "FILE create a dot file describing the predicates' dependencies");
   ("--dot", read_dot, "FILE --");
   ("-s", read_smt2, "FILE  select the smt2 output file");

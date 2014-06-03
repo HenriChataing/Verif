@@ -26,7 +26,7 @@ let main =
     let p = extract_clauses ast in
 
     identify_widening_points p;
-    simplify_clauses p;
+    simplify_clauses ~inline:!Options.do_inline p;
 
     (* Output DOT file. *)
     if !Options.dot_file <> "" then
