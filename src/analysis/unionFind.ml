@@ -120,8 +120,19 @@ let join_states (lstate0: cstate) (lstate1: cstate) (dest: cstate): unit =
 (* Compare two states. *)
 let eq_states (lstate0: cstate) (lstate1: cstate): bool =
   let eq = ref true in
+  (* Compare the values. *)
   for i=0 to (Array.length lstate0)-1 do
     if value lstate0.(i) <> value lstate1.(i) then eq := false
   done;
+  (* Compare the classes. *)
+  if !eq then begin
+    for i=0 to (Array.length lstate0)-2 do
+      for j=i+1 to (Array.length lstate0)-1 do
+        let same0 = find lstate0.(i) == find lstate0.(j)
+        and same1 = find lstate1.(i) == find lstate1.(j) in
+        if same0 <> same1 then eq := false
+      done
+    done
+  end;
   !eq
 

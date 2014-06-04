@@ -118,12 +118,10 @@ let analyze
       if loop = Some c then ()
       (* Launch another loop iteration. *)
       else if preds.(c).mark = loop_ancestors c c then begin
-        let _ = update ~dowiden:false c in
         (* Widen and stabilize. *)
-        let stable = ref false in
-        while !stable do
+        while update c do
+          clear_marks c;
           Utils.iteron (fromloop script c) (iterate (Some c)) preds.(c).children;
-          if update c then stable := false; clear_marks c
         done;
         (* Narrow. *)
         if donarrow then begin

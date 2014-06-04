@@ -549,10 +549,6 @@ let standardise_arguments (p: script): unit =
         List.for_all (fun (v', _) -> v <> v') subs
       ) c.variables @ uargs in
 
-      let diff = List.length variables - List.length c.variables in
-      Logger.log ~mode:"simpl" ("StdArg:" ^ c.cname.name ^": +" ^ string_of_int diff ^ "\n");
-      Logger.flush ();
-
       c.arguments <- vargs;
       c.variables <- variables;
       c.preconds <- preconds
@@ -605,7 +601,8 @@ let inline_clauses (g: script): unit =
       preds.(i).mark <- 1;
       match preds.(i).children, preds.(i).clauses with
       | [j], [c] ->
-          Logger.log ~mode:"simpl" ("Inline " ^ preds.(i).pname.name ^ " -> " ^ preds.(j).pname.name); Logger.newline ~mode:"simpl" ();
+          Logger.log ~mode:"simpl" ("Inline " ^ preds.(i).pname.name ^ " -> " ^ preds.(j).pname.name);
+          Logger.newline ~mode:"simpl" ();
           List.iter (inline c) preds.(j).clauses;
           List.iter (inline c) g.negatives;
 
@@ -740,7 +737,7 @@ let minimize_clause_arguments (p: script): unit =
   Logger.execute ~mode:"simpl-debug" (fun _ ->
     for i=0 to (Array.length p.predicates)-1 do
       if p.predicates.(i).valid then begin
-        Logger.log ("Predicate " ^ vname p.predicates.(i).pname ^ ":\n");
+        Logger.log ("Predicate " ^ p.predicates.(i).pname.name ^ ":\n");
         print_lstate state.(i)
       end
     done;
