@@ -62,7 +62,7 @@ let union ?(join: 'a -> 'a -> 'a = fun x _ -> x) (x: 'a uvar) (y: 'a uvar): unit
   end
 
 
-(** Application to a constant domain. *)
+(** Application to constant domain analysis. *)
 
 type cvalue =
     Bot                   (* Unconstrained. *)
@@ -79,7 +79,7 @@ type cstate = cvalue uvar array
 
 
 (* Make fresh union variables for the arguments of a predicate. *)
-let make_uvars (xs: var list): cstate =
+let make_state (xs: var list): cstate =
   Array.of_list (List.map (fun x -> make_uvar x Bot) xs)
 
 
@@ -100,4 +100,28 @@ let equals (x: var) (y: var) (lstate: cstate): unit =
   union ~join:join lstate.(x.vid) lstate.(y.vid)
 
 
+(* Join the partitions of two local states (as coming from different clauses). *)
+let join_states (lstate0: cstate) (lstate1: cstate) (dest: cstate): unit =
+  let size = Array.length lstate0 in
+  (* Reset the destination. *)
+  for i=0 to size-1 do
+    dest.(i).parent <- Utils.Left (join (value lstate0.(i)) (value lstate1.(i)))
+  done;
+  (* Derive the equivalence classes. *)
+  for i=0 to size-2 do
+    for j=i+1 to size-1 do
+      (* i and j are in the same class iff they are in both states. *)
+      if find lstate0.(i) == find lstate0.(j) &&
+         find lstate1.(i) == find lstate1.(j) then
+        union dest.(i) dest.(j)
+    done
+  done
+
+(* Compare two states. *)
+let eq_states (lstate0: cstate) (lstate1: cstate): bool =
+  let eq = ref true in
+  for i=0 to (Array.length lstate0)-1 do
+    if value lstate0.(i) <> value lstate1.(i) then eq := false
+  done;
+  !eq
 

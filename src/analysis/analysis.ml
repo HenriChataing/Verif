@@ -305,11 +305,9 @@ let run_analysis
   let state = make_initial_state man g in
   (* The predicates. *)
   let preds = g.predicates in
-  (* Stability flag. *)
-  let stable = ref false in
 
   (* Update the value at one point. *)
-  let update ?(dowiden: bool = true) (c: int): unit =
+  let update ?(dowiden: bool = true) (c: int): bool =
     let pre = List.map (evaluate_preconds man g state) preds.(c).clauses in
     let env = preds.(c).environment in
     let d = List.fold_left (fun d p -> Abstract1.join man d p) (Abstract1.bottom man env) pre in
@@ -320,101 +318,11 @@ let run_analysis
 
     if not (Abstract1.is_eq man state.(c) d') then begin
       state.(c) <- d';
-      stable := false
-    end
+      true
+    end else false
   in
 
-  (* Loop ancestors. *)
-  let loop_ancestors (loop: int) (c: int) =
-    List.fold_left (fun n c' ->
-      if List.mem loop preds.(c').fromloops then n else n+1) 0 preds.(c).ancestors
-  in
-  (* Clear the marks. *)
-  let clear_marks (loop: int): unit =
-    for i=0 to (Array.length preds)-1 do
-      if i = loop then
-        preds.(i).mark <- loop_ancestors loop i
-      else if List.mem loop preds.(i).fromloops then
-        preds.(i).mark <- 0
-    done
-  in
-
-  (* Iterate. *)
-  let rec iterate (loop: int option) (c: int): unit =
-    begin match loop with
-    | None ->
-        Logger.log ~mode:"abstract-debug" ("Iterate: [] " ^ preds.(c).pname.name ^ "\n")
-    | Some cloop ->
-        Logger.log ~mode:"abstract-debug"
-          ("Iterate: [" ^ preds.(cloop).pname.name ^ "] " ^ preds.(c).pname.name ^ "\n")
-    end;
-
-    preds.(c).mark <- preds.(c).mark + 1;
-
-    (* Loop header. *)
-    if preds.(c).widen then begin
-      (* Reached the stop point. *)
-      if loop = Some c then ()
-      (* Launch another loop iteration. *)
-      else if preds.(c).mark = loop_ancestors c c then begin
-        update ~dowiden:false c;
-        (* Widen and stabilize. *)
-        let invariant = ref (Abstract1.bottom man preds.(c).environment) in
-        while !invariant <> state.(c) do
-          invariant := state.(c);
-          Utils.iteron (fromloop g c) (iterate (Some c)) preds.(c).children;
-          update c; clear_marks c
-        done;
-        (* Narrow. *)
-        Utils.iteron (fromloop g c) (iterate (Some c)) preds.(c).children;
-        update ~dowiden:false c; clear_marks c;
-        (* Leave the loop. *)
-        for c'=0 to (Array.length preds)-1 do
-          if fromloop g c c' then
-            Utils.iteron (fun c' -> not (fromloop g c c')) (iterate loop) preds.(c').children
-        done
-      end
-
-    (* Not a loop header. *)
-    end else begin
-      (* Waiting for additional values. *)
-      if preds.(c).mark < List.length preds.(c).ancestors then ()
-      (* All values are here. *)
-      else if preds.(c).mark = List.length preds.(c).ancestors then begin
-        (* Compute the value at c. *)
-        update c;
-        match loop with
-        | None -> List.iter (iterate loop) preds.(c).children
-        | Some cloop -> Utils.iteron (fromloop g cloop) (iterate loop) preds.(c).children
-      end
-    end
-  in
-
-  (** REDUCIBLE GRAPHS **)
-  if g.reducible then begin
-    (* Start the iteration at all header points. *)
-    for i=0 to (Array.length preds)-1 do
-      preds.(i).mark <- if preds.(i).head then -1 else 0;
-    done;
-    for i=0 to (Array.length preds)-1 do
-      if preds.(i).head then iterate None i
-    done;
-
-  (** NON REDUCIBLE GRAPHS **)
-  end else begin
-    let stable = ref false in
-    while not !stable do
-      stable := true;
-      for i=0 to (Array.length preds)-1 do
-        if preds.(i).valid then begin
-          let d = state.(i) in
-          update i;
-          if not (Abstract1.is_eq man d state.(i)) then
-            stable := false
-        end
-      done
-    done
-  end;
+  Generics.analyze g update;
 
   for i=0 to (Array.length state)-1 do
     if preds.(i).valid then begin

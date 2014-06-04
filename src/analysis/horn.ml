@@ -621,17 +621,6 @@ let inline_clauses (g: script): unit =
   done
 
 
-(** Use of an argument. *)
-type arguse =
-    Never
-  | Always
-  | Depends of (int * int) list  (* j-th argument of the i-th clause. *)
-
-let join (u: arguse) (u': arguse): arguse =
-  match u,u' with
-  | Always, _ -> Always | _, Always -> Always
-  | Never, _ -> u' | _, Never -> u
-  | Depends u, Depends u' -> Depends (u @ u')
 
 
 (** On a global scale, purge the useless clause arguments.
@@ -639,28 +628,11 @@ let join (u: arguse) (u': arguse): arguse =
     that keeps for each variable the contrained state (=the dimension of the abstract value)
     and the equalities between variables. *)
 let minimize_clause_arguments (p: script): unit =
-  (* Make fresh union variables for the arguments of a predicate. *)
-  let make_uvars xs =
-    Array.of_list (List.map (fun x -> make_uvar x Never) xs) in
 
   (* The abstract state. *)
   let state = Array.map (fun p ->
-    if p.valid then make_uvars p.arguments'
+    if p.valid then make_state p.arguments'
     else [||]) p.predicates in
-
-  (* Update the usage of an argument in a local state. *)
-  let update x u lstate =
-    UnionFind.update lstate.(x.vid) (join u) in
-
-  (* Reset a local state. *)
-  let reset lstate =
-    for i=0 to (Array.length lstate)-1 do
-      lstate.(i).parent <- Utils.Left Never
-    done in
-
-  (* Merge two equivalence classes == insert an equality. *)
-  let equals x y lstate =
-    UnionFind.union ~join:join lstate.(x.vid) lstate.(y.vid) in
 
   (* Retrieve the usage of an argument. *)
   let usage c i =
@@ -673,11 +645,11 @@ let minimize_clause_arguments (p: script): unit =
   (* Evaluate an expression. *)
   let rec evaluate lstate e =
     match e with
-    | Expr.Var (_, v) when isarg v -> update v Always lstate
+    | Expr.Var (_, v) when isarg v -> update_state v Top lstate
     | Expr.Predicate (_, c, es) ->
         (* Join with the equivalence of predicate c. *)
         Utils.iteri (fun i e ->
-          if usage c i = Always then evaluate lstate e;
+          if usage c i = Top then evaluate lstate e;
           match e with
           | Expr.Var (_, v) when isarg v ->
               Utils.iteri (fun j e' ->
@@ -716,43 +688,29 @@ let minimize_clause_arguments (p: script): unit =
 
       IntMap.iter (fun c vs ->
         Logger.log "[ "; List.iter (fun uv -> Logger.log (vname uv ^ " ")) vs;
-        if UnionFind.value lstate.(c) = Always then Logger.log "] = [ Always ]\n"
-        else Logger.log "] = [ Never ]\n"
+        if UnionFind.value lstate.(c) = Top then Logger.log "] = [ Top ]\n"
+        else Logger.log "] = [ Bot ]\n"
       ) !equivs
     ) in
 
-  (* Join the partitions of two local states (as coming from different clauses). *)
-  let join_lstates lstate0 lstate1 dest =
-    let size = Array.length lstate0 in
-    (* Reset the destination. *)
-    for i=0 to size-1 do
-      dest.(i).parent <- Utils.Left (join (UnionFind.value lstate0.(i)) (UnionFind.value lstate1.(i)))
-    done;
-    (* Derive the equivalence classes. *)
-    for i=0 to size-2 do
-      for j=i+1 to size-1 do
-        (* i and j are in the same class iff they are in both states. *)
-        if UnionFind.find lstate0.(i) == UnionFind.find lstate0.(j) &&
-           UnionFind.find lstate1.(i) == UnionFind.find lstate1.(j) then
-          UnionFind.union dest.(i) dest.(j)
-      done
-    done in
-
   (* Update the value of a single predicate. *)
-  let update_predicate (c: int): unit =
+  let update ?(dowiden: bool = true) (c: int): bool =
     (* Make usable local states. *)
-    let lstate0 = ref (make_uvars p.predicates.(c).arguments') in
+    let lstate0 = ref (make_state p.predicates.(c).arguments') in
     match p.predicates.(c).clauses with
-    | [] -> ()
+    | [] -> false
     | [cl] -> begin
         evaluate_preconds !lstate0 cl.preconds;
-        state.(c) <- !lstate0
+        if not (eq_states state.(c) !lstate0) then begin
+          state.(c) <- !lstate0;
+          true
+        end else false
       end
     | cl::cls -> begin
         (* Make more local states. Can't use state.(c) because of self recursing
            predicates. *)
-        let lstate1 = ref (make_uvars p.predicates.(c).arguments')
-        and lstate2 = ref (make_uvars p.predicates.(c).arguments') in
+        let lstate1 = ref (make_state p.predicates.(c).arguments')
+        and lstate2 = ref (make_state p.predicates.(c).arguments') in
         (* Evaluate each clause, and join the values.
            For each iteration :
             - lstate0 serves to compute the value of the clause
@@ -762,34 +720,21 @@ let minimize_clause_arguments (p: script): unit =
         List.iter (fun cl ->
           reset !lstate0;
           evaluate_preconds !lstate0 cl.preconds;
-          join_lstates !lstate0 !lstate1 !lstate2;  (* lstate2 is reset by the function call. *)
+          join_states !lstate0 !lstate1 !lstate2;  (* lstate2 is reset by the function call. *)
           let tmp = !lstate2 in
           lstate2 := !lstate1;
           lstate1 := tmp
         ) cls;
         (* At this point, lstate1 contains the final value. *)
-        state.(c) <- !lstate1
+        if not (eq_states state.(c) !lstate1) then begin
+          state.(c) <- !lstate1;
+          true
+        end else false
       end
   in
 
-  (* Compare two states. *)
-  let compare lstate0 lstate1 =
-    let eq = ref true in
-    for i=0 to (Array.length lstate0)-1 do
-      if UnionFind.value lstate0.(i) <> UnionFind.value lstate1.(i) then eq := false
-    done in
-
   (* Run the analysis. *)
-  let stable = ref false in
-  while not !stable do
-    stable := true;
-    for i=0 to (Array.length p.predicates)-1 do
-      p.predicates.(i).mark <- if p.predicates.(i).head then -1 else 0;
-    done;
-    for i=0 to (Array.length p.predicates)-1 do
-      if p.predicates.(i).head then Generics.iterate p.predicates update_predicate i
-    done
-  done;
+  Generics.analyze ~donarrow:false p update;
 
   (* Display the results. *)
   Logger.execute ~mode:"simpl-debug" (fun _ ->
@@ -812,7 +757,7 @@ let minimize_clause_arguments (p: script): unit =
     make up for the missing arguments and constraints. *)
 
   let keep (c: int) (i: int): bool =
-    if UnionFind.value state.(c).(i) = Never then false
+    if UnionFind.value state.(c).(i) = Bot then false
     else UnionFind.find state.(c).(i) == state.(c).(i) in
 
   (* Apply the modifications to an expression. *)
