@@ -25,12 +25,17 @@ MENHIR = menhir
 
 .PHONY: all clean
 
-all: $(EXECUTABLE)
+all: native
 
-$(EXECUTABLE): $(MODULES:%=%.ml) $(GENERATED)
+native: $(MODULES:%=%.ml) $(GENERATED)
 	@echo "Building.."
 	@$(OCAMLBUILD) $(BFLAGS) -libs $(BLIBS) -cflags $(CFLAGS) -lflags $(LFLAGS) $(INCLUDES) $(MAIN).native
 	@mv $(MAIN).native $(EXECUTABLE)
+
+byte: $(MODULES:%=%.ml) $(GENERATED)
+	@echo "Building.."
+	@$(OCAMLBUILD) $(BFLAGS) -libs $(BLIBS) -cflags $(CFLAGS) -lflags $(LFLAGS) $(INCLUDES) $(MAIN).byte
+	@mv $(MAIN).byte $(EXECUTABLE)
 
 parsing/parser.ml parsing/parser.mli: parsing/parser.mly
 	@echo "Generating Parser module.."
