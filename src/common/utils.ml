@@ -6,6 +6,12 @@ type ('a,'b) either =
     Left of 'a
   | Right of 'b
 
+let const (c: 'a) (_: 'b): 'a = c
+
+
+let rec enum (fst: int) (lst: int): int list =
+  if fst > lst then []
+  else fst::(enum (fst+1) lst)
 
 let iteri (f: int -> 'a -> unit) (xs: 'a list): unit =
   let rec iteraux i xs =

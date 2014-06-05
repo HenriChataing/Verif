@@ -346,16 +346,22 @@ let check_negatives
 
 (** Insert the computed invariant as preconditions of clauses relevant
   to a loop predicate. *)
-let insert_invariant
+let insert_invariants
     (man: 'a Manager.t)
     (state: 'a abstract_state)
     (ascript: script)
-    (script: Horn.script): unit =
-  for i=0 to (Array.length script.predicates)-1 do
-    if script.predicates.(i).valid && script.predicates.(i).widen then begin
-      let es = exprs_of_value script.predicates.(i).arguments' man state.(i) in
-      List.iter (fun c -> c.preconds <- es @ c.preconds) script.predicates.(i).clauses
-    end
-  done
-
+    (script: Horn.script)
+    (mode: string): unit =
+  if mode <> "all" || mode <> "loops" then ()
+  else begin
+    let select =
+      if mode = "all" then const true
+      else fun i -> script.predicates.(i).widen in
+    for i=0 to (Array.length script.predicates)-1 do
+      if script.predicates.(i).valid && select i then begin
+        let es = exprs_of_value script.predicates.(i).arguments' man state.(i) in
+        List.iter (fun c -> c.preconds <- es @ c.preconds) script.predicates.(i).clauses
+      end
+    done
+  end
 

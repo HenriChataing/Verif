@@ -18,6 +18,9 @@ val do_inline: bool ref
 (** The value domain of the analysis. *)
 val value_domain: string ref
 
+(** Specify the way to insert invariants. *)
+val insert_invariants: string ref
+
 (** The filename that has been provided on the command line. *)
 val filename: string
 

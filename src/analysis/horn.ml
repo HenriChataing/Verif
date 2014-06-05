@@ -381,8 +381,9 @@ let identify_widening_points (g: script): unit =
   let size = Array.length g.predicates in
   (* Initialize the dominants. *)
   let dominants = Array.make size [] in
+  let all = Utils.enum 0 (size-1) in
   for i=0 to size-1 do
-    dominants.(i) <- [i]
+    dominants.(i) <- all
   done;
   let stable = ref false in
   (* Compute the dominants. *)
@@ -462,7 +463,7 @@ let identify_widening_points (g: script): unit =
   if g.reducible then begin
     (* Mark the loop points. *)
     let rec looppoints (header: int) (i: int): unit =
-      if header = i then ()
+      if List.mem header g.predicates.(i).fromloops then ()
       else begin
         g.predicates.(i).fromloops <- Utils.insert header g.predicates.(i).fromloops;
         List.iter (looppoints header) g.predicates.(i).ancestors
@@ -642,7 +643,7 @@ let minimize_clause_arguments (p: script): unit =
   (* Evaluate an expression. *)
   let rec evaluate lstate e =
     match e with
-    | Expr.Var (_, v) when isarg v -> update_state v Top lstate
+    | Expr.Var (_, v) when isarg v -> settop v lstate
     | Expr.Predicate (_, c, es) ->
         (* Join with the equivalence of predicate c. *)
         Utils.iteri (fun i e ->
@@ -669,6 +670,9 @@ let minimize_clause_arguments (p: script): unit =
       match e with
       | Expr.Binary (_, "==", Expr.Var (_,v0), Expr.Var (_,v1)) ->
           equals v0 v1 lstate
+      | Expr.Binary (_, "==", Expr.Var (_, v), Expr.Prim (_, p))
+      | Expr.Binary (_, "==", Expr.Prim (_, p), Expr.Var (_, v)) when isarg v ->
+          set v p lstate
       | _ -> evaluate lstate e
     ) es in
 

@@ -41,14 +41,24 @@ let main =
         | "polka" ->
           let man = Polka.manager_alloc_loose () in
           let state = run_analysis man g in
-          check_negatives man g state
+          if check_negatives man g state then true
+          else begin
+            insert_invariants man state g p !Options.insert_invariants;
+            false
+          end
         | "box" ->
           let man = Box.manager_alloc () in
           let state = run_analysis man g in
-          check_negatives man g state
+          if check_negatives man g state then true
+          else begin
+            insert_invariants man state g p !Options.insert_invariants;
+            false
+          end
         | _ -> assert false
       in
-      if ok then print_string "sat" else print_string "unknown"; print_newline ();
+      if ok then print_string "sat"
+      else print_string "unknown";
+      print_newline ()
     end;
 
     let ast = commands_of_script p in
@@ -56,7 +66,11 @@ let main =
     (* Pretty print the clauses. *)
     if !Options.pprint_clauses then begin
       for i=0 to (Array.length p.predicates)-1 do
-        if p.predicates.(i).valid then List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.predicates.(i).clauses
+        if p.predicates.(i).valid then
+          List.iter (fun c ->
+            print_string (string_of_clause c);
+            print_newline ()
+          ) p.predicates.(i).clauses
       done;
       List.iter (fun c -> print_string (string_of_clause c); print_newline ()) p.negatives
     end;

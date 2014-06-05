@@ -64,6 +64,8 @@ let union ?(join: 'a -> 'a -> 'a = fun x _ -> x) (x: 'a uvar) (y: 'a uvar): unit
 
 (** Application to constant domain analysis. *)
 
+exception Incoherent of var
+
 type cvalue =
     Bot                   (* Unconstrained. *)
   | Const of Primitive.t  (* Equal to some primitive value. *)
@@ -75,6 +77,7 @@ let join (u: cvalue) (u': cvalue): cvalue =
   | Top, _ | _, Top -> Top
   | Const p, Const p' -> if p = p' then Const p else Top
 
+(* States corresponding to predicates. *)
 type cstate = cvalue uvar array
 
 
@@ -84,8 +87,19 @@ let make_state (xs: var list): cstate =
 
 
 (* Update the usage of an argument in a local state. *)
-let update_state (x: var) (v: cvalue) (lstate: cstate): unit =
-  update lstate.(x.vid) (join v)
+let settop (x: var) (lstate: cstate): unit =
+  update lstate.(x.vid) (fun p ->
+    match p with
+    | Const _ -> p
+    | _ -> Top)
+
+
+(* Set a variable to a constant value. *)
+let set (x: var) (p: Primitive.t) (lstate: cstate): unit =
+  update lstate.(x.vid) (fun p' ->
+    match p' with
+    | Const p' when p <> p' -> raise (Incoherent x)
+    | _ -> Const p)
 
 
 (* Reset a local state. *)

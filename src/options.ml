@@ -6,6 +6,7 @@ let smt2_file = ref ""
 let run_analysis = ref true
 let value_domain = ref "box"
 let do_inline = ref true
+let insert_invariants = ref "none"
 
 (* Check proposed smt2 file. *)
 let read_smt2 = Arg.String (fun s ->
@@ -29,6 +30,16 @@ let read_domain = Arg.String (fun s ->
   | _ -> raise (Arg.Bad "option: --domain: invalid domain")
 )
 
+(* Check proposed invariant insertion points. *)
+let read_points = Arg.String (fun s ->
+  let points = ["none"; "all"; "loops"] in
+  let pts = List.filter (fun d ->
+    try String.sub d 0 (String.length s) = s with _ -> false) points in
+  match pts with
+  | [d] -> insert_invariants := d
+  | _ -> raise (Arg.Bad "option: --insert-invariants: invalid selection")
+)
+
 let options = Arg.align [
   ("-v", Arg.Int (fun v -> Logger.set_verbose v), " toggle verbose mode");
   ("-c", Arg.Unit (fun _ -> pprint_clauses := true), " pretty print the horn clauses");
@@ -39,7 +50,8 @@ let options = Arg.align [
   ("-s", read_smt2, "FILE  select the smt2 output file");
   ("--smt2", read_smt2, "FILE --");
   ("--verbose", Arg.String (fun m -> Logger.display m), "LVL set verbose level");
-  ("--domain", read_domain, "DOM set the value domain (default box)")
+  ("--domain", read_domain, "DOM set the value domain (default box)");
+  ("--insert-invariants", read_points, " select the insertion points of the invariants (default none)")
 ]
 
 let message = "Usage: verif [OPTIONS] FILE"
