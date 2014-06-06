@@ -647,7 +647,7 @@ let minimize_clause_arguments (p: script): unit =
     | Expr.Predicate (_, c, es) ->
         (* Join with the equivalence of predicate c. *)
         Utils.iteri (fun i e ->
-          if usage c i = Top then evaluate lstate e;
+          if usage c i <> Bot then evaluate lstate e;
           match e with
           | Expr.Var (_, v) when isarg v ->
               Utils.iteri (fun j e' ->
@@ -689,8 +689,7 @@ let minimize_clause_arguments (p: script): unit =
 
       IntMap.iter (fun c vs ->
         Logger.log "[ "; List.iter (fun uv -> Logger.log (vname uv ^ " ")) vs;
-        if UnionFind.value lstate.(c) = Top then Logger.log "] = [ Top ]\n"
-        else Logger.log "] = [ Bot ]\n"
+        Logger.log ("] = " ^ string_of_cvalue (UnionFind.value lstate.(c)) ^ "\n")
       ) !equivs
     ) in
 
@@ -758,15 +757,19 @@ let minimize_clause_arguments (p: script): unit =
     make up for the missing arguments and constraints. *)
 
   let keep (c: int) (i: int): bool =
-    if UnionFind.value state.(c).(i) = Bot then false
+    if UnionFind.value state.(c).(i) <> Top then false
     else UnionFind.find state.(c).(i) == state.(c).(i) in
 
   (* Apply the modifications to an expression. *)
   let rec modify (c: int) (e: Expr.t): Expr.t * Expr.t list =
     match e with
     | Expr.Var (pos,v) when isarg v ->
-        let v' = UnionFind.find state.(c).(v.vid) in
-        Expr.Var (pos,v'.var), []
+        begin match UnionFind.value state.(c).(v.vid) with
+        | Const p -> Expr.Prim (pos, p), []
+        | _ ->
+            let v' = UnionFind.find state.(c).(v.vid) in
+            Expr.Var (pos,v'.var), []
+        end
     | Expr.Binary (pos, op, e0, e1) ->
         let e0', eqs0 = modify c e0
         and e1', eqs1 = modify c e1 in
@@ -779,13 +782,17 @@ let minimize_clause_arguments (p: script): unit =
             - the arguments are filtered to remove duplicate and unused variables.
             - Equalities are generated matching the duplicates. *)
         let _, es', eqs = List.fold_left (fun (i, es', eqs) e ->
-          let ri = UnionFind.find state.(c'.vid).(i) in
+          let ri = UnionFind.find state.(c'.vid).(i)
+          and vi = UnionFind.value state.(c'.vid).(i) in
           (* Check for inherited constraints. *)
           let inherited =
-            if ri != state.(c'.vid).(i) then
-              [Expr.Binary (pos, "==", e, List.nth es ri.var.vid)]
-            else
-              []
+            match vi with
+            | Const p -> [Expr.Binary (pos, "==", e, Expr.Prim (pos, p))]
+            | _ ->
+              if ri != state.(c'.vid).(i) then
+                [Expr.Binary (pos, "==", e, List.nth es ri.var.vid)]
+              else
+                []
           in
           (* Delete or not the argument. *)
           if keep c'.vid i then
@@ -810,6 +817,14 @@ let minimize_clause_arguments (p: script): unit =
               Expr.Var (r0.var.pos, r0.var),
               Expr.Var (r1.var.pos, r1.var)
             )::pre
+      | Expr.Binary (pos, "==", Expr.Var (pos0, v), Expr.Prim (pos1, p))
+      | Expr.Binary (pos, "==", Expr.Prim (pos1, p), Expr.Var (pos0, v)) when isarg v ->
+          begin match UnionFind.value state.(c).(v.vid) with
+          | Const _ -> pre
+          | _ ->
+              let v' = UnionFind.find state.(c).(v.vid) in
+              Expr.Binary (pos, "==", Expr.Var (pos0, v'.var), Expr.Prim (pos1, p))::pre
+          end
       | e ->
           let e', eqs = modify c e in
           let eqs' = modify_preconds c eqs in

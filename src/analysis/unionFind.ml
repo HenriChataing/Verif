@@ -77,6 +77,11 @@ let join (u: cvalue) (u': cvalue): cvalue =
   | Top, _ | _, Top -> Top
   | Const p, Const p' -> if p = p' then Const p else Top
 
+let string_of_cvalue (v: cvalue): string =
+  match v with
+  | Top -> "Top" | Bot -> "Bot"
+  | Const p -> "Const " ^ Primitive.to_string p
+
 (* States corresponding to predicates. *)
 type cstate = cvalue uvar array
 
